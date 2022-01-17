@@ -23,7 +23,7 @@ TODO:
     X tinker w/ sd of gaussian
     X set up visual angle degree and monitor
     X keep contrast constant
-    x separate saccade / no saccades into blocks
+    X separate saccade / no saccades into blocks
 
 '''
 
