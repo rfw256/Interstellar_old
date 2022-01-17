@@ -24,6 +24,14 @@ TODO:
     X set up visual angle degree and monitor
     X keep contrast constant
     X separate saccade / no saccades into blocks
+    X Fix dialog box issue
+    X Transfer to Mac OS
+    - For each run, go through each position once (random shuffle)
+    - Static ITIS of 2.5-5.5 in steps of 1, so total trial time is multiple of TR
+        - repeat N times where N = nPositions / 4
+        - Randomly shuffle ITIs for each run
+        - swap nTrials with nPositions
+    - Add load previous params functionality
 
 '''
 
@@ -122,7 +130,7 @@ iti_range = [2, 5]
 nPositions = 4
 eccentricity = 7
 trialDuration = 11.5
-subdir = "C:/Users/17868/NYU/FYP/data"
+subdir = "/Users/rfw256/Documents/Research/Interstellar/Data"
 max_decrements = 4
 responseDuration = 1
 decrementDuration = 0.5
@@ -132,11 +140,14 @@ TR = 0.720
 volumes = 100
 skipSync = 5
 sync = '5'
+print("SUCCESS")
 
 expParams = {
+    'Subject': 0,
+    'Output Directory': "/Users/rfw256/Documents/Research/Interstellar/data",
     'nTrials': 10,
     'iti_range': [2, 5],
-    'nPositions': 4,
+    'nPositions': 16,
     'eccentricity': 7,
     'trialDuration': 11.5,
     'max_decrements': 4,
@@ -146,41 +157,40 @@ expParams = {
     'saccadeType': 'Saccade'
 }
 
-# INITIALIZE EXPERIMENT
-trialParams = generate_experiment(expParams)
-
 # Load parameters from prev run. If not, then use default set
-try:
-    expInfo = fromFile('lastParams.pickle')
-except:
-    expInfo = {
-        'subject': 0,
-        'version': 'pilot'
-        }
 
 # Add current time
-expInfo['dateStr'] = data.getDateStr()
+expParams['dateStr'] = data.getDateStr()
 
 # Present parameter dialog
-dlg = gui.DlgFromDict(expInfo, title = 'Perception Pilot', fixed = ['dateStr'])
 
-if dlg.OK:
-    toFile('lastParams.pickle', expInfo)
-else:
-    core.quit()
+dlg = gui.DlgFromDict(expParams, title = 'Perception Pilot', fixed = ['dateStr', 'iti_range'])
+# print("trial start")
+# if dlg.OK:
+#     toFile('lastParams.pickle', expInfo)
+# else:
+#     core.quit()
 
 # Make tsv files to save experiment data, and contrast responses
-saccades_filename = '\sub-' + "{0:0=3d}_".format(expInfo['subject']) + "saccades_run-" + expInfo['dateStr']
-saccades_datafile = open(subdir + saccades_filename+'.tsv', 'w')
+# Make tsv files to save experiment data, and contrast responses
+subdir = expParams['Output Directory']
+subject = expParams['Subject']
+date = expParams['dateStr']
+
+saccades_filename = '/sub-' + "{0:0=3d}_".format(subject) + "saccades_run-" + date
+saccades_datafile = open(subdir + saccades_filename +'.tsv', 'w')
 saccades_datafile.write(
     'trialNum\tITIDur\tgradientPosX\tgradientPosY\torientation\tnDecrements\tnDetected\thits\tfalseAlarms' +
     '\tmeanAccuracy\tsaccadePosX\tsaccadePosY\tsaccadeAng\tsaccadeEcc\tsaccadeRT\tsaccadeErrorDist' +
     '\tsaccadeErrorAng\tsaccadeErrorEcc')
 
-contrast_filename = '\sub-' + "{0:0=3d}_".format(expInfo['subject']) + "contrast_run-" + expInfo['dateStr']
+contrast_filename = '/sub-' + "{0:0=3d}_".format(subject) + "contrast_run-" + date
 contrast_datafile = open(subdir + contrast_filename+'.tsv', 'w')
 contrast_datafile.write('trialNum\tnDecrements\tcontrast\tresponseTimes\tresponseAcc\treactionTime')
 
+# INITIALIZE EXPERIMENT
+print(expParams['iti_range'])
+trialParams = generate_experiment(expParams)
 
 # Create window & stimuli
 monitor = monitors.Monitor('testMonitor', distance = 68, width = 32)
