@@ -4,11 +4,38 @@ from psychopy.hardware.emulator import launchScan
 import numpy as np
 import random
 
+# EXPERIMENT PARAMETERS
+expParams = {
+    'Subject': 0,
+    'Session': 1,
+    'saccadeType': ['Saccade', 'No Saccade'],
+    'expMode': ['Test', 'Scan'],
+    'Output Directory': "/Users/rfw256/Documents/Research/Interstellar/data",
+    
+    # Parameters below this line will be fixed and uneditable from the dialogbox
+    'Screen Distance': 68,
+    'Screen Width': 32,
+    'Screen Resolution': [1024, 768],
+    'TR': 1,
+    'volumes': 5,
+    'skipSync': 5,
+    'sync': '5',
+    'iti_list': [2.5, 3.5, 4.5, 5.5],
+    'nPositions': 4,
+    'max_decrements': 4,
+    'eccentricity': 7,
+    'trialDuration': 11.5,
+    'saccadeDuration': 2,
+    'decrementDuration': 0.5,
+    'responseDuration': 1,
+    'constantContrast': 0.65,
+}
+
 '''
+
 TODO:
 - Basic Trial Structure: 
     X ITI 2000-5000ms 
-    - cHANGE itis TO ADD UP TO MULTIPLES OF tr
     X Stimulus Presentation 11.5 s
     X Contrast Decrement
     X Saccade / No-Saccade Response 1000ms
@@ -26,12 +53,21 @@ TODO:
     X separate saccade / no saccades into blocks
     X Fix dialog box issue
     X Transfer to Mac OS
-    - For each run, go through each position once (random shuffle)
-    - Static ITIS of 2.5-5.5 in steps of 1, so total trial time is multiple of TR
-        - repeat N times where N = nPositions / 4
-        - Randomly shuffle ITIs for each run
-        - swap nTrials with nPositions
-    - Add load previous params functionality
+    X For each run, go through each position once (random shuffle)
+    X Static ITIS of 2.5-5.5 in steps of 1, so total trial time is multiple of TR
+        X repeat N times where N = nPositions / 4
+        X Randomly shuffle ITIs for each run
+        X swap nTrials with nPositions
+    X Tweak dialog box and params to have only whats needed
+    X Change reaction time formula to time since last contrast
+    X Investigate why contrast is multiplied by 1000
+    X change contrast data formula to most recent contrast level
+    X add missed column to data
+    X Add 6 seconds to end of run
+    - Figure out issue with while loop and timing/refresh rate 
+        - (Check if pscyhopy is able to lock refresh rate?)
+    - Add load previous params functionality and save current params
+        - Add positions permanence via exp params
 
 '''
 
@@ -63,7 +99,7 @@ def generate_decrements(trialDuration, max_decrements, decrementDuration, respon
     return decrements, valid_response_periods, contrasts
 
 
-def get_keypress(printkey=False):
+def get_keypress(printkey=False, sync = expParams['sync']):
     keys = event.getKeys()
     if keys and keys[0] == 'q':
         win.close()
@@ -79,12 +115,13 @@ def get_keypress(printkey=False):
 
 def generate_experiment(expParams):
     # If number of trials is not even, return a value error
-    if expParams['nTrials'] % 2:
-        raise ValueError("Number of Trials not an even number.")
+    if expParams['nPositions'] % len(expParams['iti_list']):
+        raise ValueError("Number of Positions not a multiple of number of ITIs.")
 
     trialParams = {}
 
-    itis = range(expParams['iti_range'][0]*1000, expParams['iti_range'][1]*1000)
+    itis = expParams['iti_list'] * int(expParams['nPositions'] / len(expParams['iti_list']))
+    random.shuffle(itis)
 
     # Generate isoeccentric positions for stimuli, by randomly sampling radians w/in nPositions bins of equal size
     xstart = np.arange(0, 2*np.pi, 2*np.pi / expParams['nPositions'])
@@ -93,15 +130,13 @@ def generate_experiment(expParams):
     positions = expParams['eccentricity'] * np.array([np.sin(x), np.cos(x)]).T 
 
     expParams['Positions'] = positions
-
-    responseType = ['Saccade', 'No Saccade'] * int(expParams['nTrials']/2)
-    random.shuffle(responseType)
-
-    for trial in range(expParams['nTrials']):
-        idx = np.random.randint(expParams['nPositions'])
-        pos = positions[idx]
-        ori = np.degrees(x[idx]) + 90
-
+    
+    trialnums = list(range(expParams['nPositions']))
+    random.shuffle(trialnums)
+    
+    for i, trial in enumerate(trialnums):
+        pos = positions[trial]
+        ori = np.degrees(x[trial]) + 90
 
         decrements, response_periods, contrasts = generate_decrements(
             expParams['trialDuration'], 
@@ -110,8 +145,8 @@ def generate_experiment(expParams):
             expParams['responseDuration'], 
             constantContrast = expParams['constantContrast'])
 
-        trialParams[str(trial)] = {
-            'ITIDur': np.random.choice(itis) / 1000,
+        trialParams[str(i)] = {
+            'ITIDur': itis[trial],
             'gratingPos': pos,
             'gratingOri': ori,
             'gratingAng': np.degrees(x[(positions == pos)[:, 0]])[0],
@@ -123,55 +158,25 @@ def generate_experiment(expParams):
 
     return trialParams
 
-
-# EXPERIMENT PARAMETERS
-nTrials = 10
-iti_range = [2, 5]
-nPositions = 4
-eccentricity = 7
-trialDuration = 11.5
-subdir = "/Users/rfw256/Documents/Research/Interstellar/Data"
-max_decrements = 4
-responseDuration = 1
-decrementDuration = 0.5
-saccadeDuration = 2
-expMode = 'Test'
-TR = 0.720
-volumes = 100
-skipSync = 5
-sync = '5'
-print("SUCCESS")
-
-expParams = {
-    'Subject': 0,
-    'Output Directory': "/Users/rfw256/Documents/Research/Interstellar/data",
-    'nTrials': 10,
-    'iti_range': [2, 5],
-    'nPositions': 16,
-    'eccentricity': 7,
-    'trialDuration': 11.5,
-    'max_decrements': 4,
-    'decrementDuration': 0.5,
-    'responseDuration': 1,
-    'constantContrast': 0.5,
-    'saccadeType': 'Saccade'
-}
-
 # Load parameters from prev run. If not, then use default set
 
 # Add current time
 expParams['dateStr'] = data.getDateStr()
 
 # Present parameter dialog
-
-dlg = gui.DlgFromDict(expParams, title = 'Perception Pilot', fixed = ['dateStr', 'iti_range'])
-# print("trial start")
+dlg = gui.DlgFromDict(expParams, title = 'Perception Pilot', fixed = [
+    'Screen Distance', 'Screen Width', 'Screen Resolution',
+    'dateStr', 'TR', 'volumes', 'skipSync', 'sync', 'iti_list', 
+    'nPositions', 'max_decrements', 'eccentricity', 'trialDuration',
+    'saccadeDuration', 'decrementDuration', 'responseDuration', 
+    'constantContrast'],
+    order = list(expParams.keys()))
+    
 # if dlg.OK:
 #     toFile('lastParams.pickle', expInfo)
 # else:
 #     core.quit()
 
-# Make tsv files to save experiment data, and contrast responses
 # Make tsv files to save experiment data, and contrast responses
 subdir = expParams['Output Directory']
 subject = expParams['Subject']
@@ -180,8 +185,8 @@ date = expParams['dateStr']
 saccades_filename = '/sub-' + "{0:0=3d}_".format(subject) + "saccades_run-" + date
 saccades_datafile = open(subdir + saccades_filename +'.tsv', 'w')
 saccades_datafile.write(
-    'trialNum\tITIDur\tgradientPosX\tgradientPosY\torientation\tnDecrements\tnDetected\thits\tfalseAlarms' +
-    '\tmeanAccuracy\tsaccadePosX\tsaccadePosY\tsaccadeAng\tsaccadeEcc\tsaccadeRT\tsaccadeErrorDist' +
+    'trialNum\tITIDur\tgradientPosX\tgradientPosY\torientation\tnDecrements\tnDetected\tnMissed\thits\tfalseAlarms' +
+    '\tmeanAccuracy/tsaccadeType\tsaccadePosX\tsaccadePosY\tsaccadeAng\tsaccadeEcc\tsaccadeRT\tsaccadeErrorDist' +
     '\tsaccadeErrorAng\tsaccadeErrorEcc')
 
 contrast_filename = '/sub-' + "{0:0=3d}_".format(subject) + "contrast_run-" + date
@@ -189,13 +194,12 @@ contrast_datafile = open(subdir + contrast_filename+'.tsv', 'w')
 contrast_datafile.write('trialNum\tnDecrements\tcontrast\tresponseTimes\tresponseAcc\treactionTime')
 
 # INITIALIZE EXPERIMENT
-print(expParams['iti_range'])
 trialParams = generate_experiment(expParams)
 
 # Create window & stimuli
-monitor = monitors.Monitor('testMonitor', distance = 68, width = 32)
+monitor = monitors.Monitor('testMonitor', distance = expParams['Screen Distance'], width = expParams['Screen Width'])
 win = visual.Window(
-    [1024, 768], allowGUI=True, monitor=monitor, units='deg')
+    expParams['Screen Resolution'], allowGUI=True, monitor=monitor, units='deg')
 
 mouse = event.Mouse(win=win)
 
@@ -212,9 +216,9 @@ itiClock = core.Clock()
 # fMRI Trigger
 vol = launchScan(
     win,
-    settings = {'TR': TR, 'volumes': volumes, 'skip': skipSync},
+    settings = {'TR': expParams['TR'], 'volumes': expParams['volumes'], 'skip': expParams['skipSync']},
     globalClock = globalClock,
-    mode = expMode,
+    mode = expParams['expMode'],
     wait_msg = "Waiting for Sync Pulse"
 )
 
@@ -232,7 +236,7 @@ win.flip()
 event.waitKeys(keyList=['1'])
 
 # TRIAL LOOP
-for trial in range(nTrials):
+for trial in range(expParams['nPositions']):
     # Initialize Trial
     parameters = trialParams[str(trial)]
 
@@ -307,7 +311,8 @@ for trial in range(nTrials):
             else:
                 response_acc.append(0)
                 response_contrast.append(1)
-                reaction_times.append(-1)
+                reaction_time = np.min(np.abs(t - np.asarray(response_periods[:, 0])))
+                reaction_times.append(reaction_time)
 
         event.clearEvents()
 
@@ -316,7 +321,7 @@ for trial in range(nTrials):
     mouse.mouseClock.reset()
     clicked = False
 
-    while mouse.mouseClock.getTime() < saccadeDuration:
+    while mouse.mouseClock.getTime() < expParams['saccadeDuration']:
 
         if parameters['saccadeType'] == 'Saccade':
             fixation.color = 'green'
@@ -348,16 +353,28 @@ for trial in range(nTrials):
             fixation.draw()
             win.flip()
         
+    
+    # Post-trial delay for 6 s after last trial
+    if trial == expParams['nPositions'] - 1:
+        delayStart = globalClock.getTime()
+        fixation.mask = 'cross'
+        fixation.color = 'black'
+        fixation.size = 0.5
 
+        fixation.draw()
+        win.flip()
+        
+        while globalClock.getTime() - delayStart < 6:
+            pass
+    
     # Store trial data
-    "SAVING TRIAL DATA"
     contrast_datafile = open(subdir + contrast_filename+'.tsv', 'a')
 
     [contrast_datafile.write("\n{}\t{}\t{:.2f}\t{:.0f}\t{}\t{:.0f}".format(
         trial,
         decrements.shape[0],
-        response_contrast[i]*1000,
-        response_times[i],
+        response_contrast[i],
+        response_times[i]*1000,
         response_acc[i],
         reaction_times[i]))
         for i in range(len(response_times))]
@@ -372,6 +389,7 @@ for trial in range(nTrials):
             'gratingOri': parameters['gratingOri'],
             'nDecrements': decrements.shape[0],
             'nDetected': np.sum(detected),
+            'nMissed': decrements.shape[0] - np.sum(detected),
             'hits': np.sum(np.asarray(response_acc) == 1),
             'falseAlarms': np.sum(np.asarray(response_acc) == 0),
             'meanAccuracy': np.mean(np.asarray(response_acc)),
@@ -383,7 +401,7 @@ for trial in range(nTrials):
             'saccadeRT': mouseTime,
             'saccadeErrorDist': np.linalg.norm(mousePos - parameters['gratingPos']),
             'saccadeErrorAng': angError,
-            'saccadeErrorEcc': mouseEcc - eccentricity
+            'saccadeErrorEcc': mouseEcc - expParams['eccentricity']
         }
 
     else:
@@ -395,6 +413,7 @@ for trial in range(nTrials):
             'gratingOri': parameters['gratingOri'],
             'nDecrements': decrements.shape[0],
             'nDetected': np.sum(detected),
+            'nMissed': decrements.shape[0] - np.sum(detected),
             'hits': np.sum(np.asarray(response_acc) == 1),
             'falseAlarms': np.sum(np.asarray(response_acc) == 0),
             'meanAccuracy': np.mean(np.asarray(response_acc)),
