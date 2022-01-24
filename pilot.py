@@ -3,6 +3,8 @@ from psychopy.tools.filetools import fromFile, toFile
 from psychopy.hardware.emulator import launchScan
 import numpy as np
 import random
+import glob
+import pickle
 
 # EXPERIMENT PARAMETERS
 expParams = {
@@ -45,7 +47,6 @@ TODO:
         X randomly select from pos bins
     X Trigger experiment w/ sync pulse
     X Add non-saccade condition (red dot)
-    - Add eyelink code
     X Make dir of motion radial (always inward)
     X tinker w/ sd of gaussian
     X set up visual angle degree and monitor
@@ -64,10 +65,12 @@ TODO:
     X change contrast data formula to most recent contrast level
     X add missed column to data
     X Add 6 seconds to end of run
+    X Add load previous params functionality and save current params
+        X Add positions permanence via exp params
+    - Edit most recent contrast decrement calculation
+    - Add eyelink code
     - Figure out issue with while loop and timing/refresh rate 
-        - (Check if pscyhopy is able to lock refresh rate?)
-    - Add load previous params functionality and save current params
-        - Add positions permanence via exp params
+    - (Check if pscyhopy is able to lock refresh rate?)
 
 '''
 
@@ -114,29 +117,45 @@ def get_keypress(printkey=False, sync = expParams['sync']):
 
 
 def generate_experiment(expParams):
-    # If number of trials is not even, return a value error
-    if expParams['nPositions'] % len(expParams['iti_list']):
-        raise ValueError("Number of Positions not a multiple of number of ITIs.")
+    # Try to load previous subject parameters
+    params_filenames = glob.glob(expParams["Output Directory"] + 
+        "/sub-" + "{0:0=3d}_".format(expParams["Subject"]) + "*.pickle")
+    
+    # If Previous params exist, load positions and angles
+    if params_filenames:
+        file = open(params_filenames[-1], "rb")
+        prevParams = pickle.load(file)
+        file.close()
+        
+        expParams['Positions'] = prevParams['Positions']
+        expParams['AnglesRadians'] = prevParams['AnglesRadians']
+    
+    # If previous params for sub does not exist, initialize positions and angles
+    else:
+        # If number of trials is not even, return a value error
+        if expParams['nPositions'] % len(expParams['iti_list']):
+            raise ValueError("Number of Positions not a multiple of number of ITIs.")
 
-    trialParams = {}
+        # Generate isoeccentric positions for stimuli, by randomly sampling radians 
+        # w/in nPositions bins of equal size
+        xstart = np.arange(0, 2*np.pi, 2*np.pi / expParams['nPositions'])
+        xstop = xstart + 2*np.pi/expParams['nPositions']
+        x = np.random.uniform(xstart, xstop)
+        positions = expParams['eccentricity'] * np.array([np.sin(x), np.cos(x)]).T 
 
-    itis = expParams['iti_list'] * int(expParams['nPositions'] / len(expParams['iti_list']))
-    random.shuffle(itis)
-
-    # Generate isoeccentric positions for stimuli, by randomly sampling radians w/in nPositions bins of equal size
-    xstart = np.arange(0, 2*np.pi, 2*np.pi / expParams['nPositions'])
-    xstop = xstart + 2*np.pi/expParams['nPositions']
-    x = np.random.uniform(xstart, xstop)
-    positions = expParams['eccentricity'] * np.array([np.sin(x), np.cos(x)]).T 
-
-    expParams['Positions'] = positions
+        expParams['Positions'] = positions
+        expParams['AnglesRadians'] = x
     
     trialnums = list(range(expParams['nPositions']))
     random.shuffle(trialnums)
+    itis = expParams['iti_list'] * int(expParams['nPositions'] / len(expParams['iti_list']))
+    random.shuffle(itis)
+    trialParams = {}
+    print(expParams)
     
     for i, trial in enumerate(trialnums):
-        pos = positions[trial]
-        ori = np.degrees(x[trial]) + 90
+        pos = expParams['Positions'][trial]
+        ori = np.degrees(expParams['AnglesRadians'][trial]) + 90
 
         decrements, response_periods, contrasts = generate_decrements(
             expParams['trialDuration'], 
@@ -149,7 +168,7 @@ def generate_experiment(expParams):
             'ITIDur': itis[trial],
             'gratingPos': pos,
             'gratingOri': ori,
-            'gratingAng': np.degrees(x[(positions == pos)[:, 0]])[0],
+            'gratingAng': np.degrees(expParams['AnglesRadians'][(expParams["Positions"] == pos)[:, 0]])[0],
             'decrements': decrements,
             'response_periods': response_periods,
             'contrasts': contrasts,
@@ -171,30 +190,35 @@ dlg = gui.DlgFromDict(expParams, title = 'Perception Pilot', fixed = [
     'saccadeDuration', 'decrementDuration', 'responseDuration', 
     'constantContrast'],
     order = list(expParams.keys()))
-    
-# if dlg.OK:
-#     toFile('lastParams.pickle', expInfo)
-# else:
-#     core.quit()
 
 # Make tsv files to save experiment data, and contrast responses
 subdir = expParams['Output Directory']
 subject = expParams['Subject']
 date = expParams['dateStr']
+session = expParams['Session']
 
-saccades_filename = '/sub-' + "{0:0=3d}_".format(subject) + "saccades_run-" + date
+saccades_filename = '/sub-' + "{0:0=3d}_".format(subject) + "saccades_run-" + str(session)
 saccades_datafile = open(subdir + saccades_filename +'.tsv', 'w')
 saccades_datafile.write(
     'trialNum\tITIDur\tgradientPosX\tgradientPosY\torientation\tnDecrements\tnDetected\tnMissed\thits\tfalseAlarms' +
     '\tmeanAccuracy/tsaccadeType\tsaccadePosX\tsaccadePosY\tsaccadeAng\tsaccadeEcc\tsaccadeRT\tsaccadeErrorDist' +
     '\tsaccadeErrorAng\tsaccadeErrorEcc')
 
-contrast_filename = '/sub-' + "{0:0=3d}_".format(subject) + "contrast_run-" + date
+contrast_filename = '/sub-' + "{0:0=3d}_".format(subject) + "contrast_run-" + str(session)
 contrast_datafile = open(subdir + contrast_filename+'.tsv', 'w')
 contrast_datafile.write('trialNum\tnDecrements\tcontrast\tresponseTimes\tresponseAcc\treactionTime')
 
 # INITIALIZE EXPERIMENT
 trialParams = generate_experiment(expParams)
+
+# Save experiment params to file
+if dlg.OK:
+    params_filename = '/sub-' + "{0:0=3d}_".format(subject) + "expParams_run-" + str(session)
+    toFile(subdir + params_filename + '.pickle', expParams)
+    print("EXPPARAMS:")
+    print(expParams)
+else:
+    core.quit()
 
 # Create window & stimuli
 monitor = monitors.Monitor('testMonitor', distance = expParams['Screen Distance'], width = expParams['Screen Width'])
