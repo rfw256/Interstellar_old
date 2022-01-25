@@ -9,7 +9,7 @@ import pickle
 # EXPERIMENT PARAMETERS
 expParams = {
     'Subject': 0,
-    'Session': 1,
+    'Run': 1,
     'saccadeType': ['Saccade', 'No Saccade'],
     'expMode': ['Test', 'Scan'],
     'Output Directory': "/Users/rfw256/Documents/Research/Interstellar/data",
@@ -67,10 +67,20 @@ TODO:
     X Add 6 seconds to end of run
     X Add load previous params functionality and save current params
         X Add positions permanence via exp params
-    - Edit most recent contrast decrement calculation
+    X Edit most recent contrast decrement calculation
+    X Have data saved at the end of the run, as opposed to at the end of every trial
+    X add angle in degrees to saccade data
+    - Add feedback to end of trial
+    - double check data collection
+        X Fix orientation so if above 360, resets to 0
+        - saccadeErrorEcc looks off, so does saccadeEcc
+        - hits, nDetected, and nDecrements don't add up. What's going on?
+        - 
+    - write up tsv variable descriptions and how they are computed
     - Add eyelink code
     - Figure out issue with while loop and timing/refresh rate 
     - (Check if pscyhopy is able to lock refresh rate?)
+
 
 '''
 
@@ -156,6 +166,8 @@ def generate_experiment(expParams):
     for i, trial in enumerate(trialnums):
         pos = expParams['Positions'][trial]
         ori = np.degrees(expParams['AnglesRadians'][trial]) + 90
+        
+        if ori >= 360: ori -= 360
 
         decrements, response_periods, contrasts = generate_decrements(
             expParams['trialDuration'], 
@@ -195,25 +207,29 @@ dlg = gui.DlgFromDict(expParams, title = 'Perception Pilot', fixed = [
 subdir = expParams['Output Directory']
 subject = expParams['Subject']
 date = expParams['dateStr']
-session = expParams['Session']
+run = expParams['Run']
 
-saccades_filename = '/sub-' + "{0:0=3d}_".format(subject) + "saccades_run-" + str(session)
+saccades_filename = '/sub-' + "{0:0=3d}_".format(subject) + "saccades_run-" + str(run)
 saccades_datafile = open(subdir + saccades_filename +'.tsv', 'w')
 saccades_datafile.write(
-    'trialNum\tITIDur\tgradientPosX\tgradientPosY\torientation\tnDecrements\tnDetected\tnMissed\thits\tfalseAlarms' +
-    '\tmeanAccuracy/tsaccadeType\tsaccadePosX\tsaccadePosY\tsaccadeAng\tsaccadeEcc\tsaccadeRT\tsaccadeErrorDist' +
-    '\tsaccadeErrorAng\tsaccadeErrorEcc')
+    'trialNum\tITIDur\tgratingPosX\tgratingPosY\torientation\tangle\tnDecrements' +
+    '\tnDetected\tnMissed\thits\tfalseAlarms\tmeanAccuracy\tsaccadeType' + 
+    '\tsaccadePosX\tsaccadePosY\tsaccadeAng\tsaccadeEcc\tsaccadeRT' +
+    '\tsaccadeErrorDist\tsaccadeErrorAng\tsaccadeErrorEcc')
 
-contrast_filename = '/sub-' + "{0:0=3d}_".format(subject) + "contrast_run-" + str(session)
+contrast_filename = '/sub-' + "{0:0=3d}_".format(subject) + "contrast_run-" + str(run)
 contrast_datafile = open(subdir + contrast_filename+'.tsv', 'w')
 contrast_datafile.write('trialNum\tnDecrements\tcontrast\tresponseTimes\tresponseAcc\treactionTime')
 
 # INITIALIZE EXPERIMENT
 trialParams = generate_experiment(expParams)
+saccade_data = {}
+contrast_data = {}
+nPressed = 0
 
 # Save experiment params to file
 if dlg.OK:
-    params_filename = '/sub-' + "{0:0=3d}_".format(subject) + "expParams_run-" + str(session)
+    params_filename = '/sub-' + "{0:0=3d}_".format(subject) + "expParams"
     toFile(subdir + params_filename + '.pickle', expParams)
     print("EXPPARAMS:")
     print(expParams)
@@ -261,6 +277,7 @@ event.waitKeys(keyList=['1'])
 
 # TRIAL LOOP
 for trial in range(expParams['nPositions']):
+    print("Trial " + str(trial) + " out of " + str(expParams['nPositions']))
     # Initialize Trial
     parameters = trialParams[str(trial)]
 
@@ -279,7 +296,6 @@ for trial in range(expParams['nPositions']):
     detected = np.zeros(decrements.shape[0])
 
     # ITI
-    print("ITI")
     fixation.mask = 'cross'
     fixation.color = 'black'
     fixation.size = 0.5
@@ -293,13 +309,18 @@ for trial in range(expParams['nPositions']):
         event.clearEvents()
     
     # Stimulus Presentation
-    print("STIMULUS")
     fixation.mask = 'circle'
     fixation.size = 0.3
     fixation.draw()
     win.flip()
 
     trialClock.reset()
+    
+    lastContrastTimeSet = False
+    lastContrastTime = 0
+    lastContrast = 1
+    nContrasts = 0
+    
     while trialClock.getTime() < expParams['trialDuration']:
         t = trialClock.getTime() * 1000 
 
@@ -308,6 +329,13 @@ for trial in range(expParams['nPositions']):
             # Decrease contrast
             grating.setPhase(0.05, '+')
             grating.contrast = contrasts[(decrements[:, 0] <=  t) & (t < decrements[:, 1])][0]
+            
+            if not lastContrastTimeSet:
+                lastContrastTime = t
+                lastContrastTimeSet = True
+                lastContrast = grating.contrast
+                nContrasts += 1
+                
             grating.draw()
             fixation.draw()
             win.flip()
@@ -317,6 +345,11 @@ for trial in range(expParams['nPositions']):
             # No contrast manipulation
             grating.setPhase(0.05, '+')
             grating.contrast = 1
+            
+            if lastContrastTimeSet:
+                lastContrastTimeSet = False
+                lastContrast = 1
+                
             grating.draw()
             fixation.draw()
             win.flip()
@@ -324,31 +357,32 @@ for trial in range(expParams['nPositions']):
         key = get_keypress(printkey=True)
         if key:
             response_times.append(globalClock.getTime())
+            nPressed += 1
+            response_acc = 0
 
             if ((response_periods[:, 0] <=  t) & (t < response_periods[:, 1])).any():
-                response_acc.append(1)
-                valid_resp = (response_periods[:, 0] <=  t) & (t < response_periods[:, 1])
-                response_contrast.append(contrasts[valid_resp][0])
-                reaction_times.append(t - response_periods[valid_resp][0, 0])
-                detected[valid_resp] = 1
-
-            else:
-                response_acc.append(0)
-                response_contrast.append(1)
-                reaction_time = np.min(np.abs(t - np.asarray(response_periods[:, 0])))
-                reaction_times.append(reaction_time)
+                response_acc = 1
+                detected[nContrasts - 1] = 1
+            
+            contrast_data[str(nPressed)] = {
+                'trialNum': trial,
+                'nDecrements': decrements.shape[0],
+                'contrast': lastContrast,
+                'responseTimes': globalClock.getTime()*1000,
+                'responseAcc': response_acc,
+                'reactionTime': t - lastContrastTime
+    }
 
         event.clearEvents()
 
     # Saccade Response 
-    print("RESPONSE")
     mouse.mouseClock.reset()
     clicked = False
-
-    while mouse.mouseClock.getTime() < expParams['saccadeDuration']:
-
-        if parameters['saccadeType'] == 'Saccade':
-            fixation.color = 'green'
+    
+    if parameters['saccadeType'] == 'Saccade':
+        fixation.color = 'green'
+        
+        while mouse.mouseClock.getTime() < expParams['saccadeDuration']:
             fixation.draw()
             win.flip()
 
@@ -372,45 +406,24 @@ for trial in range(expParams['nPositions']):
                     mouseEcc = np.linalg.norm(mousePos - np.array([0, 0]))
             event.clearEvents()
 
-        else:
-            fixation.color = 'red'
+    else:
+        fixation.color = 'red'
+        
+        while mouse.mouseClock.getTime() < expParams['saccadeDuration']:
             fixation.draw()
             win.flip()
-        
-    
-    # Post-trial delay for 6 s after last trial
-    if trial == expParams['nPositions'] - 1:
-        delayStart = globalClock.getTime()
-        fixation.mask = 'cross'
-        fixation.color = 'black'
-        fixation.size = 0.5
-
-        fixation.draw()
-        win.flip()
-        
-        while globalClock.getTime() - delayStart < 6:
-            pass
-    
+            
     # Store trial data
-    contrast_datafile = open(subdir + contrast_filename+'.tsv', 'a')
-
-    [contrast_datafile.write("\n{}\t{}\t{:.2f}\t{:.0f}\t{}\t{:.0f}".format(
-        trial,
-        decrements.shape[0],
-        response_contrast[i],
-        response_times[i]*1000,
-        response_acc[i],
-        reaction_times[i]))
-        for i in range(len(response_times))]
-
-    saccades_datafile = open(subdir + saccades_filename+'.tsv', 'a')
+    print("Storing Data")
+    
     if clicked:
-        saccade_data = {
+        saccade_data[str(trial)] = {
             'trialNum': trial,
             'ITIDur': parameters['ITIDur'],
             'gratingPosX': parameters['gratingPos'][0],
             'gratingPosY': parameters['gratingPos'][1],
             'gratingOri': parameters['gratingOri'],
+            'gratingAng': parameters['gratingAng'],
             'nDecrements': decrements.shape[0],
             'nDetected': np.sum(detected),
             'nMissed': decrements.shape[0] - np.sum(detected),
@@ -429,12 +442,13 @@ for trial in range(expParams['nPositions']):
         }
 
     else:
-        saccade_data = {
+        saccade_data[str(trial)] = {
             'trialNum': trial,
             'ITIDur': parameters['ITIDur'],
             'gratingPosX': parameters['gratingPos'][0],
             'gratingPosY': parameters['gratingPos'][1],
             'gratingOri': parameters['gratingOri'],
+            'gratingAng': parameters['gratingAng'],
             'nDecrements': decrements.shape[0],
             'nDetected': np.sum(detected),
             'nMissed': decrements.shape[0] - np.sum(detected),
@@ -452,4 +466,33 @@ for trial in range(expParams['nPositions']):
             'saccadeErrorEcc': None
         }
     
-    saccades_datafile.write("\n" + "\t".join(map(str, list(saccade_data.values()))))
+    print("TRIAL DATA STORED IN WORKING MEMORY")
+    # Post-trial delay for 6 s after last trial
+    if trial == expParams['nPositions'] - 1:
+        delayStart = globalClock.getTime()
+        fixation.mask = 'cross'
+        fixation.color = 'black'
+        fixation.size = 0.5
+
+        fixation.draw()
+        win.flip()
+        
+        while globalClock.getTime() - delayStart < 6:
+            pass
+            
+        # Save data to files
+        saccades_datafile = open(subdir + saccades_filename + '.tsv', 'a')
+        
+        for trial in range(expParams['nPositions']):
+            saccades_datafile.write("\n" + "\t".join(
+                map(str, list(saccade_data[str(trial)].values()))))
+                
+        saccades_datafile.close()
+        
+        contrasts_datafile = open(subdir + contrast_filename + '.tsv', 'a')
+        
+        for response in range(nPressed):
+            contrasts_datafile.write("\n" + "\t".join(
+                map(str, list(contrast_data[str(trial)].values()))))
+        
+        contrasts_datafile.close()
