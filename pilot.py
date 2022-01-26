@@ -73,9 +73,11 @@ TODO:
     - Add feedback to end of trial
     - double check data collection
         X Fix orientation so if above 360, resets to 0
-        - saccadeErrorEcc looks off, so does saccadeEcc
-        - hits, nDetected, and nDecrements don't add up. What's going on?
-        - 
+        X saccadeErrorEcc looks off, so does saccadeEcc
+            *** On iMac w/ retina, mouse pos is doubled. Effect should go away 
+              when displaying to an external screen ***
+        X Fix hits, nDetected, and nDecrements so they add up properly
+        X Fix contrast data saving
     - write up tsv variable descriptions and how they are computed
     - Add eyelink code
     - Figure out issue with while loop and timing/refresh rate 
@@ -127,6 +129,8 @@ def get_keypress(printkey=False, sync = expParams['sync']):
 
 
 def generate_experiment(expParams):
+    saccade_data = {}
+
     # Try to load previous subject parameters
     params_filenames = glob.glob(expParams["Output Directory"] + 
         "/sub-" + "{0:0=3d}_".format(expParams["Subject"]) + "*.pickle")
@@ -186,8 +190,32 @@ def generate_experiment(expParams):
             'contrasts': contrasts,
             'saccadeType': expParams['saccadeType']
         }
+        
+        saccade_data[str(i)] = {
+            'trialNum': i,
+            'ITIDur': itis[trial],
+            'gratingPosX': pos[0],
+            'gratingPosY': pos[1],
+            'gratingOri': ori,
+            'gratingAng': np.degrees(expParams['AnglesRadians'][(expParams["Positions"] == pos)[:, 0]])[0],
+            'nDecrements': decrements.shape[0],
+            'nDetected': 0,
+            'nMissed': 0,
+            'hits': 0,
+            'falseAlarms': 0,
+            'meanAccuracy': 0,
+            'saccadeType': expParams['saccadeType'],
+            'saccadePosX': None,
+            'saccadePosY': None,
+            'saccadeAng': None,
+            'saccadeEcc': None,
+            'saccadeRT': None,
+            'saccadeErrorDist': None,
+            'saccadeErrorAng': None,
+            'saccadeErrorEcc': None
+        }
 
-    return trialParams
+    return trialParams, saccade_data
 
 # Load parameters from prev run. If not, then use default set
 
@@ -209,23 +237,10 @@ subject = expParams['Subject']
 date = expParams['dateStr']
 run = expParams['Run']
 
-saccades_filename = '/sub-' + "{0:0=3d}_".format(subject) + "saccades_run-" + str(run)
-saccades_datafile = open(subdir + saccades_filename +'.tsv', 'w')
-saccades_datafile.write(
-    'trialNum\tITIDur\tgratingPosX\tgratingPosY\torientation\tangle\tnDecrements' +
-    '\tnDetected\tnMissed\thits\tfalseAlarms\tmeanAccuracy\tsaccadeType' + 
-    '\tsaccadePosX\tsaccadePosY\tsaccadeAng\tsaccadeEcc\tsaccadeRT' +
-    '\tsaccadeErrorDist\tsaccadeErrorAng\tsaccadeErrorEcc')
-
-contrast_filename = '/sub-' + "{0:0=3d}_".format(subject) + "contrast_run-" + str(run)
-contrast_datafile = open(subdir + contrast_filename+'.tsv', 'w')
-contrast_datafile.write('trialNum\tnDecrements\tcontrast\tresponseTimes\tresponseAcc\treactionTime')
-
 # INITIALIZE EXPERIMENT
-trialParams = generate_experiment(expParams)
-saccade_data = {}
+trialParams, saccade_data = generate_experiment(expParams)
 contrast_data = {}
-nPressed = 0
+nPressed = -1
 
 # Save experiment params to file
 if dlg.OK:
@@ -308,19 +323,22 @@ for trial in range(expParams['nPositions']):
         get_keypress(printkey=True)
         event.clearEvents()
     
-    # Stimulus Presentation
+    # Stimulus Presentation - Initialize trial parameters
+    lastContrastTimeSet = False
+    lastContrastTime = 0
+    lastContrast = 1
+    nContrasts = 0
+    hits = 0
+    falseAlarms = 0
     fixation.mask = 'circle'
     fixation.size = 0.3
+    
     fixation.draw()
     win.flip()
 
     trialClock.reset()
     
-    lastContrastTimeSet = False
-    lastContrastTime = 0
-    lastContrast = 1
-    nContrasts = 0
-    
+    # Stimulus Presentation - Trial
     while trialClock.getTime() < expParams['trialDuration']:
         t = trialClock.getTime() * 1000 
 
@@ -363,6 +381,10 @@ for trial in range(expParams['nPositions']):
             if ((response_periods[:, 0] <=  t) & (t < response_periods[:, 1])).any():
                 response_acc = 1
                 detected[nContrasts - 1] = 1
+                hits += 1
+            
+            else:
+                falseAlarms += 1
             
             contrast_data[str(nPressed)] = {
                 'trialNum': trial,
@@ -371,7 +393,8 @@ for trial in range(expParams['nPositions']):
                 'responseTimes': globalClock.getTime()*1000,
                 'responseAcc': response_acc,
                 'reactionTime': t - lastContrastTime
-    }
+            }
+            print(contrast_data[str(nPressed)].items())
 
         event.clearEvents()
 
@@ -415,58 +438,36 @@ for trial in range(expParams['nPositions']):
             
     # Store trial data
     print("Storing Data")
+    print(contrast_data.keys())
     
     if clicked:
-        saccade_data[str(trial)] = {
-            'trialNum': trial,
-            'ITIDur': parameters['ITIDur'],
-            'gratingPosX': parameters['gratingPos'][0],
-            'gratingPosY': parameters['gratingPos'][1],
-            'gratingOri': parameters['gratingOri'],
-            'gratingAng': parameters['gratingAng'],
-            'nDecrements': decrements.shape[0],
-            'nDetected': np.sum(detected),
-            'nMissed': decrements.shape[0] - np.sum(detected),
-            'hits': np.sum(np.asarray(response_acc) == 1),
-            'falseAlarms': np.sum(np.asarray(response_acc) == 0),
-            'meanAccuracy': np.mean(np.asarray(response_acc)),
-            'saccadeType': parameters['saccadeType'],
-            'saccadePosX': mousePos[0],
-            'saccadePosY': mousePos[1],
-            'saccadeAng': mouseAng,
-            'saccadeEcc':mouseEcc,
-            'saccadeRT': mouseTime,
-            'saccadeErrorDist': np.linalg.norm(mousePos - parameters['gratingPos']),
-            'saccadeErrorAng': angError,
-            'saccadeErrorEcc': mouseEcc - expParams['eccentricity']
-        }
+        saccade_data[str(trial)]['nDetected'] = np.sum(detected)
+        saccade_data[str(trial)]['nMissed'] = decrements.shape[0] - np.sum(detected)
+        saccade_data[str(trial)]['hits'] = hits
+        saccade_data[str(trial)]['falseAlarms'] = falseAlarms
+        if hits + falseAlarms != 0: 
+            saccade_data[str(trial)]['meanAccuracy'] = hits / (hits + falseAlarms)
+        else:
+            saccade_data[str(trial)]['meanAccuracy'] = 0
+        saccade_data[str(trial)]['saccadePosX'] = mousePos[0]
+        saccade_data[str(trial)]['saccadePosY'] = mousePos[1]
+        saccade_data[str(trial)]['saccadeAng'] = mouseAng
+        saccade_data[str(trial)]['saccadeEcc'] = mouseEcc
+        saccade_data[str(trial)]['saccadeRT'] = mouseTime
+        saccade_data[str(trial)]['saccadeErrorDist'] = np.linalg.norm(mousePos - parameters['gratingPos'])
+        saccade_data[str(trial)]['saccadeErrorAng'] = angError
+        saccade_data[str(trial)]['saccadeErrorEcc'] = mouseEcc - expParams['eccentricity']
 
     else:
-        saccade_data[str(trial)] = {
-            'trialNum': trial,
-            'ITIDur': parameters['ITIDur'],
-            'gratingPosX': parameters['gratingPos'][0],
-            'gratingPosY': parameters['gratingPos'][1],
-            'gratingOri': parameters['gratingOri'],
-            'gratingAng': parameters['gratingAng'],
-            'nDecrements': decrements.shape[0],
-            'nDetected': np.sum(detected),
-            'nMissed': decrements.shape[0] - np.sum(detected),
-            'hits': np.sum(np.asarray(response_acc) == 1),
-            'falseAlarms': np.sum(np.asarray(response_acc) == 0),
-            'meanAccuracy': np.mean(np.asarray(response_acc)),
-            'saccadeType': parameters['saccadeType'],
-            'saccadePosX': None,
-            'saccadePosY': None,
-            'saccadeAng': None,
-            'saccadeEcc': None,
-            'saccadeRT': None,
-            'saccadeErrorDist': None,
-            'saccadeErrorAng': None,
-            'saccadeErrorEcc': None
-        }
+        saccade_data[str(trial)]['nDetected'] = np.sum(detected)
+        saccade_data[str(trial)]['nMissed'] = decrements.shape[0] - np.sum(detected)
+        saccade_data[str(trial)]['hits'] = hits
+        saccade_data[str(trial)]['falseAlarms'] = falseAlarms
+        if hits + falseAlarms != 0: 
+            saccade_data[str(trial)]['meanAccuracy'] = hits / (hits + falseAlarms)
+        else:
+            saccade_data[str(trial)]['meanAccuracy'] = 0
     
-    print("TRIAL DATA STORED IN WORKING MEMORY")
     # Post-trial delay for 6 s after last trial
     if trial == expParams['nPositions'] - 1:
         delayStart = globalClock.getTime()
@@ -481,18 +482,21 @@ for trial in range(expParams['nPositions']):
             pass
             
         # Save data to files
-        saccades_datafile = open(subdir + saccades_filename + '.tsv', 'a')
-        
+        saccades_filename = '/sub-' + "{0:0=3d}_".format(subject) + "saccades_run-" + str(run)
+        saccades_datafile = open(subdir + saccades_filename +'.tsv', 'w')
+        saccades_datafile.write("\t".join(map(str, list(saccade_data[str(0)].keys()))))
         for trial in range(expParams['nPositions']):
             saccades_datafile.write("\n" + "\t".join(
                 map(str, list(saccade_data[str(trial)].values()))))
                 
         saccades_datafile.close()
+
+
+        contrast_filename = '/sub-' + "{0:0=3d}_".format(subject) + "contrast_run-" + str(run)
+        contrast_datafile = open(subdir + contrast_filename+'.tsv', 'w')
+        contrast_datafile.write("\t".join(map(str, list(contrast_data[str(0)].keys()))))
+        for n in range(nPressed+1):
+            contrast_datafile.write("\n" + "\t".join(
+                map(str, list(contrast_data[str(n)].values()))))
         
-        contrasts_datafile = open(subdir + contrast_filename + '.tsv', 'a')
-        
-        for response in range(nPressed):
-            contrasts_datafile.write("\n" + "\t".join(
-                map(str, list(contrast_data[str(trial)].values()))))
-        
-        contrasts_datafile.close()
+        contrast_datafile.close()
