@@ -21,17 +21,18 @@ expParams = {
     'saccadeInput': ['Mouse', 'EyeLink'],
     'expMode': ['Test', 'Scan'],
     'Output Directory': "/Users/rfw256/Documents/Research/Interstellar/data",
+    #'Output Directory': "/Users/winawerlab/Experiments/Interstellar/data",
     
     # Parameters below this line will be fixed and uneditable from the dialogbox
     'Screen Distance': 68,
     'Screen Width': 32,
-    'Screen Resolution': [1024, 768],
+    'Screen Resolution': [1920, 1080],
     'TR': 1,
-    'volumes': 5,
-    'skipSync': 5,
+    'volumes': 270,
+    'skipSync': 0,
     'sync': '5',
     'iti_list': [2.5, 3.5, 4.5, 5.5],
-    'nPositions': 4,
+    'nPositions': 16,
     'max_decrements': 4,
     'eccentricity': 7,
     'trialDuration': 11.5,
@@ -42,56 +43,12 @@ expParams = {
 }
 
 '''
-
 TODO:
-- Basic Trial Structure: 
-    X ITI 2000-5000ms 
-    X Stimulus Presentation 11.5 s
-    X Contrast Decrement
-    X Saccade / No-Saccade Response 1000ms
-    X Function: Initialize experiment params
-        X Generate trial params for trial in trials
-        X Generate position bins
-        X randomly select from pos bins
-    X Trigger experiment w/ sync pulse
-    X Add non-saccade condition (red dot)
-    X Make dir of motion radial (always inward)
-    X tinker w/ sd of gaussian
-    X set up visual angle degree and monitor
-    X keep contrast constant
-    X separate saccade / no saccades into blocks
-    X Fix dialog box issue
-    X Transfer to Mac OS
-    X For each run, go through each position once (random shuffle)
-    X Static ITIS of 2.5-5.5 in steps of 1, so total trial time is multiple of TR
-        X repeat N times where N = nPositions / 4
-        X Randomly shuffle ITIs for each run
-        X swap nTrials with nPositions
-    X Tweak dialog box and params to have only whats needed
-    X Change reaction time formula to time since last contrast
-    X Investigate why contrast is multiplied by 1000
-    X change contrast data formula to most recent contrast level
-    X add missed column to data
-    X Add 6 seconds to end of run
-    X Add load previous params functionality and save current params
-        X Add positions permanence via exp params
-    X Edit most recent contrast decrement calculation
-    X Have data saved at the end of the run, as opposed to at the end of every trial
-    X add angle in degrees to saccade data
-    - Add feedback to end of trial
-    - double check data collection
-        X Fix orientation so if above 360, resets to 0
-        X saccadeErrorEcc looks off, so does saccadeEcc
-            *** On iMac w/ retina, mouse pos is doubled. Effect should go away 
-              when displaying to an external screen ***
-        X Fix hits, nDetected, and nDecrements so they add up properly
-        X Fix contrast data saving
-    - write up tsv variable descriptions and how they are computed
-    - Add eyelink code
-    - Figure out issue with while loop and timing/refresh rate 
-    - (Check if pscyhopy is able to lock refresh rate?)
-
-
+- Add feedback to end of trial
+- double check data collection
+- write up tsv variable descriptions and how they are computed
+- Download Eyelink package from SR tools and get pylink to import properly
+- Figure out issue with while loop and timing/refresh rate 
 '''
 
 '''HELPER FUNCTIONS'''
@@ -254,17 +211,25 @@ def generate_experiment(expParams):
     return trialParams, saccade_data
 
 
-def saccade_response(parameters, saccadeInput, saccade, event, fixation, win):
+def saccade_response(parameters, saccadeInput, eyetracker, event, fixation, win, globalClock):
+    clicked = False
+    mousePos = None
+    mouseTime = None
+    mouseAng = None
+    mouseEcc = None
+    angError = None
+    
     if expParams['saccadeType'] == 'Saccade':
         fixation.color = 'green'
     else:
         fixation.color = 'red'
+    
+    saccadeClockStart = globalClock.getTime()
         
     if parameters['saccadeInput'] == 'Mouse':
-        saccade.mouseClock.reset()
-        clicked = False
+        eyetracker.mouseClock.reset()
         
-        while saccade.mouseClock.getTime() < parameters['saccadeDuration']:
+        while globalClock.getTime() - saccadeClockStart <= parameters['saccadeDuration']:
             fixation.draw()
             win.flip()
             
@@ -272,10 +237,10 @@ def saccade_response(parameters, saccadeInput, saccade, event, fixation, win):
                 get_keypress(printkey=True)
 
                 if not clicked:
-                    buttons_pressed = saccade.getPressed()
+                    buttons_pressed = eyetracker.getPressed()
                     if sum(buttons_pressed):
-                        mousePos = saccade.getPos()
-                        mouseTime = saccade.mouseClock.getTime()
+                        mousePos = eyetracker.getPos()
+                        mouseTime = eyetracker.mouseClock.getTime()
                         print(mousePos, mouseTime)
                         clicked = True
 
@@ -289,8 +254,13 @@ def saccade_response(parameters, saccadeInput, saccade, event, fixation, win):
                 event.clearEvents()
                 
     if parameters['saccadeInput'] == 'EyeLink':
-        event.sendMessage("TRIALID %02d" % parameters['trialNum'])
+        eyetracker.sendMessage("SACC TRIALID %02d" % parameters['trialNum'])
+        
+        while globalClock.getTime() - saccadeClockStart <= parameters['saccadeDuration']:
+            pass
     
+    return clicked, mousePos, mouseTime, mouseAng, mouseEcc, angError
+        
 
 # Add current time
 expParams['dateStr'] = data.getDateStr()
@@ -304,13 +274,12 @@ dlg = gui.DlgFromDict(expParams, title = 'Perception Pilot', fixed = [
     'constantContrast'],
     order = list(expParams.keys()))
 
-# Make tsv files to save experiment data, and contrast responses
+# INITIALIZE EXPERIMENT
 subdir = expParams['Output Directory']
 subject = expParams['Subject']
 date = expParams['dateStr']
 run = expParams['Run']
 
-# INITIALIZE EXPERIMENT
 trialParams, saccade_data = generate_experiment(expParams)
 contrast_data = {}
 nPressed = -1
@@ -327,9 +296,8 @@ else:
 # Create window & stimuli
 monitor = monitors.Monitor('testMonitor', distance = expParams['Screen Distance'], width = expParams['Screen Width'])
 win = visual.Window(
-    expParams['Screen Resolution'], allowGUI=True, monitor=monitor, units='deg')
-
-mouse = event.Mouse(win=win)
+    expParams['Screen Resolution'], allowGUI=True, monitor=monitor, units='deg',
+    fullscr = True)
 
 grating = visual.GratingStim(
     win, sf=1, size=3, mask='gauss', maskParams = {'sd': 5},
@@ -337,11 +305,42 @@ grating = visual.GratingStim(
 fixation = visual.GratingStim(
     win, color=-1, colorSpace='rgb', tex=None, mask='cross', size=0.5)
 
+
+# Eyetracker 
+if expParams['saccadeInput'] == 'EyeLink':
+    eyetracker = _setup_eyelink(expParams['Screen Resolution'])
+    edf_path = '/sub-' + "{0:0=3d}_".format(subject) + "eyelink_run-" + str(run)
+    
+    eyetracker.openDataFile('temp.EDF')
+    pylink.flushGetkeyQueue()
+    eyetracker.startRecording(1, 1, 1, 1)
+    
+elif expParams['saccadeInput'] == 'Mouse':
+    eyetracker = event.Mouse(win=win)
+
+# Display instructions
+if expParams['saccadeType'] == 'Saccade':
+    instructions = "[PARTICIPANT] Press 1 when you detect a change in contrast. At the end of each trial, make a saccade"
+elif expParams['saccadeInput'] == 'No Saccade':
+    instructions = "[PARTICIPANT] Press 1 when you detect a change in contrast. At the end of each trial, DO NOT make a saccade"
+msg1 = visual.TextStim(win, pos=[0, +3], text='[OPERATOR] Hit 0 key when participant is ready')
+msg2 = visual.TextStim(win, pos=[0, -3],
+text="[PARTICIPANT] Press 1 when you detect a change in contrast. At the end of each trial, ")
+
+msg1.draw()
+msg2.draw()
+fixation.draw()
+win.flip()
+
+# Wait for a response
+event.waitKeys(keyList=['0'])
+
+# Start up some clocks
 globalClock = core.Clock()
 trialClock = core.Clock()
 itiClock = core.Clock()
 
-# fMRI Trigger
+# fMRI Sync Trigger
 vol = launchScan(
     win,
     settings = {'TR': expParams['TR'], 'volumes': expParams['volumes'], 'skip': expParams['skipSync']},
@@ -350,29 +349,6 @@ vol = launchScan(
     wait_msg = "Waiting for Sync Pulse"
 )
 
-# Eyetracker 
-if expParams['saccadeInput'] == 'EyeLink':
-    eyetracker = _setup_eyelink(expParams['Screen Resolution'])
-    edf_path = '/sub-' + "{0:0=3d}_".format(subject) + "eyelink_run-" + str(run)
-    
-    assert edf_path is not None, "edf_path must be set so we can save the eyetracker output!"
-    eyetracker.openDataFile('temp.EDF')
-    pylink.flushGetkeyQueue()
-    eyetracker.startRecording(1, 1, 1, 1)
-
-# Display instructions
-msg1 = visual.TextStim(win, pos=[0, +3], text='Hit a key when ready')
-msg2 = visual.TextStim(win, pos=[0, -3],
-text="Press 1 when you detect a change in contrast.")
-
-msg1.draw()
-msg2.draw()
-fixation.draw()
-win.flip()
-
-# Wait for a response
-event.waitKeys(keyList=['1'])
-
 # TRIAL LOOP
 for trial in range(expParams['nPositions']):
     print("Trial " + str(trial) + " out of " + str(expParams['nPositions']))
@@ -380,7 +356,8 @@ for trial in range(expParams['nPositions']):
     parameters = trialParams[str(trial)]
 
     print("INITIALIZING TRIAL")
-    mouse.setVisible(1)
+    if parameters['saccadeInput'] == 'Mouse': eyetracker.setVisible(1)
+    
     grating.pos = parameters['gratingPos']
     grating.ori = parameters['gratingOri']
     decrements = parameters['decrements']
@@ -393,7 +370,7 @@ for trial in range(expParams['nPositions']):
     reaction_times = []
     detected = np.zeros(decrements.shape[0])
 
-    # ITI
+    # ITI        
     fixation.mask = 'cross'
     fixation.color = 'black'
     fixation.size = 0.5
@@ -402,6 +379,8 @@ for trial in range(expParams['nPositions']):
     win.flip()
 
     itiClock.reset()
+    if expParams['saccadeInput'] == 'EyeLink': 
+        eyetracker.sendMessage("ITI TRIALID %02d" % parameters['trialNum'])
     while itiClock.getTime() < parameters['ITIDur']:
         get_keypress(printkey=True)
         event.clearEvents()
@@ -422,6 +401,8 @@ for trial in range(expParams['nPositions']):
     trialClock.reset()
     
     # Stimulus Presentation - Trial
+    if expParams['saccadeInput'] == 'EyeLink': 
+        eyetracker.sendMessage("STIM TRIALID %02d" % parameters['trialNum'])
     while trialClock.getTime() < expParams['trialDuration']:
         t = trialClock.getTime() * 1000 
 
@@ -482,46 +463,12 @@ for trial in range(expParams['nPositions']):
         event.clearEvents()
 
     # Saccade Response 
-    mouse.mouseClock.reset()
-    clicked = False
-    
-    if parameters['saccadeType'] == 'Saccade':
-        fixation.color = 'green'
-        
-        while mouse.mouseClock.getTime() < expParams['saccadeDuration']:
-            fixation.draw()
-            win.flip()
-
-            get_keypress(printkey=True)
-
-            if not clicked:
-                buttons_pressed = mouse.getPressed()
-
-                if sum(buttons_pressed):
-                    mousePos = mouse.getPos()
-                    mouseTime = mouse.mouseClock.getTime()
-                    print(mousePos, mouseTime)
-                    clicked = True
-
-                    normMousePos = mousePos / np.linalg.norm(mousePos)
-                    mouseAng = np.degrees(np.arccos(np.dot(
-                        np.array([1, 0]), normMousePos)))
-                    angError = np.degrees(np.arccos(np.dot(
-                        parameters['gratingPos'] / np.linalg.norm(parameters['gratingPos']), 
-                        normMousePos)))
-                    mouseEcc = np.linalg.norm(mousePos - np.array([0, 0]))
-            event.clearEvents()
-
-    else:
-        fixation.color = 'red'
-        
-        while mouse.mouseClock.getTime() < expParams['saccadeDuration']:
-            fixation.draw()
-            win.flip()
+    clicked, mousePos, mouseTime, mouseAng, mouseEcc, angError = saccade_response(
+        parameters, parameters['saccadeInput'], eyetracker, event, fixation, win,
+        globalClock)
             
     # Store trial data
     print("Storing Data")
-    print(contrast_data.keys())
     
     if clicked:
         saccade_data[str(trial)]['nDetected'] = np.sum(detected)
@@ -551,35 +498,42 @@ for trial in range(expParams['nPositions']):
         else:
             saccade_data[str(trial)]['meanAccuracy'] = 0
     
-    # Post-trial delay for 6 s after last trial
-    if trial == expParams['nPositions'] - 1:
-        delayStart = globalClock.getTime()
-        fixation.mask = 'cross'
-        fixation.color = 'black'
-        fixation.size = 0.5
+# Post-trial delay for 6 s after last trial
+delayStart = globalClock.getTime()
+fixation.mask = 'cross'
+fixation.color = 'black'
+fixation.size = 0.5
 
-        fixation.draw()
-        win.flip()
+fixation.draw()
+win.flip()
+
+while globalClock.getTime() - delayStart < 6:
+    pass
+    
+# Save data to files
+saccades_filename = '/sub-' + "{0:0=3d}_".format(subject) + "saccades_run-" + str(run)
+saccades_datafile = open(subdir + saccades_filename +'.tsv', 'w')
+saccades_datafile.write("\t".join(map(str, list(saccade_data[str(0)].keys()))))
+for trial in range(expParams['nPositions']):
+    saccades_datafile.write("\n" + "\t".join(
+        map(str, list(saccade_data[str(trial)].values()))))
         
-        while globalClock.getTime() - delayStart < 6:
-            pass
-            
-        # Save data to files
-        saccades_filename = '/sub-' + "{0:0=3d}_".format(subject) + "saccades_run-" + str(run)
-        saccades_datafile = open(subdir + saccades_filename +'.tsv', 'w')
-        saccades_datafile.write("\t".join(map(str, list(saccade_data[str(0)].keys()))))
-        for trial in range(expParams['nPositions']):
-            saccades_datafile.write("\n" + "\t".join(
-                map(str, list(saccade_data[str(trial)].values()))))
-                
-        saccades_datafile.close()
+saccades_datafile.close()
 
 
-        contrast_filename = '/sub-' + "{0:0=3d}_".format(subject) + "contrast_run-" + str(run)
-        contrast_datafile = open(subdir + contrast_filename+'.tsv', 'w')
-        contrast_datafile.write("\t".join(map(str, list(contrast_data[str(0)].keys()))))
-        for n in range(nPressed+1):
-            contrast_datafile.write("\n" + "\t".join(
-                map(str, list(contrast_data[str(n)].values()))))
-        
-        contrast_datafile.close()
+contrast_filename = '/sub-' + "{0:0=3d}_".format(subject) + "contrast_run-" + str(run)
+contrast_datafile = open(subdir + contrast_filename+'.tsv', 'w')
+contrast_datafile.write("\t".join(map(str, list(contrast_data[str(0)].keys()))))
+for n in range(nPressed+1):
+    contrast_datafile.write("\n" + "\t".join(
+        map(str, list(contrast_data[str(n)].values()))))
+
+contrast_datafile.close()
+
+if expParams['saccadeInput'] == 'EyeLink':
+        eyetracker.stopRecording()
+        eyetracker.closeDataFile()
+        eyetracker.receiveDataFile('temp.EDF', edf_path)
+        eyetracker.close()
+
+win.close()
