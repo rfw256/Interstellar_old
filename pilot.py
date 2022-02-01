@@ -5,12 +5,20 @@ import numpy as np
 import random
 import glob
 import pickle
+import warnings
+
+try:
+    import pylink
+except ImportError:
+    warnings.warn("Unable to find pylink, will not be able to collect eye-tracking data")
+
 
 # EXPERIMENT PARAMETERS
 expParams = {
     'Subject': 0,
     'Run': 1,
     'saccadeType': ['Saccade', 'No Saccade'],
+    'saccadeInput': ['Mouse', 'EyeLink'],
     'expMode': ['Test', 'Scan'],
     'Output Directory': "/Users/rfw256/Documents/Research/Interstellar/data",
     
@@ -87,6 +95,31 @@ TODO:
 '''
 
 '''HELPER FUNCTIONS'''
+def _setup_eyelink(win_size):
+    """set up the eyelink eye-tracking
+    """
+
+    # Connect to eyelink
+    eyetracker = pylink.EyeLink('192.168.1.5')
+    pylink.openGraphics()
+
+    # Set content of edf file
+    eyetracker.sendCommand('link_sample_data=LEFT,RIGHT,GAZE,AREA')
+    eyetracker.sendCommand('file_sample_data=LEFT,RIGHT,GAZE,AREA,GAZERES,STATUS')
+    eyetracker.sendCommand('file_event_filter=LEFT,RIGHT,FIXATION,SACCADE,BLINK,MESSAGE,BUTTON')
+
+    # Set coords
+    eyetracker.sendCommand('screen_pixel_coords=0 0 {} {}'.format(*win_size))
+    eyetracker.sendMessage('DISPLAY_COORDS 0 0 {} {}'.format(*win_size))
+
+    # Calibrate
+    eyetracker.setCalibrationType('HV5')
+    eyetracker.doTrackerSetup(win_size)
+    pylink.closeGraphics()
+
+    return eyetracker
+
+
 def generate_decrements(trialDuration, max_decrements, decrementDuration, responsePeriod, constantContrast = 0):
     # Generate N = max_decrements bins of indices in ms for decrements to possibly start
     bins = np.array_split(np.arange(0, trialDuration*1000 + 1), max_decrements)
@@ -181,6 +214,7 @@ def generate_experiment(expParams):
             constantContrast = expParams['constantContrast'])
 
         trialParams[str(i)] = {
+            'trialNum': str(i),
             'ITIDur': itis[trial],
             'gratingPos': pos,
             'gratingOri': ori,
@@ -188,7 +222,9 @@ def generate_experiment(expParams):
             'decrements': decrements,
             'response_periods': response_periods,
             'contrasts': contrasts,
-            'saccadeType': expParams['saccadeType']
+            'saccadeType': expParams['saccadeType'],
+            'saccadeDuration': expParams['saccadeDuration'],
+            'saccadeInput': expParams['saccadeInput']
         }
         
         saccade_data[str(i)] = {
@@ -217,7 +253,44 @@ def generate_experiment(expParams):
 
     return trialParams, saccade_data
 
-# Load parameters from prev run. If not, then use default set
+
+def saccade_response(parameters, saccadeInput, saccade, event, fixation, win):
+    if expParams['saccadeType'] == 'Saccade':
+        fixation.color = 'green'
+    else:
+        fixation.color = 'red'
+        
+    if parameters['saccadeInput'] == 'Mouse':
+        saccade.mouseClock.reset()
+        clicked = False
+        
+        while saccade.mouseClock.getTime() < parameters['saccadeDuration']:
+            fixation.draw()
+            win.flip()
+            
+            if parameters['saccadeType'] == 'Saccade':
+                get_keypress(printkey=True)
+
+                if not clicked:
+                    buttons_pressed = saccade.getPressed()
+                    if sum(buttons_pressed):
+                        mousePos = saccade.getPos()
+                        mouseTime = saccade.mouseClock.getTime()
+                        print(mousePos, mouseTime)
+                        clicked = True
+
+                        normMousePos = mousePos / np.linalg.norm(mousePos)
+                        mouseAng = np.degrees(np.arccos(np.dot(
+                            np.array([1, 0]), normMousePos)))
+                        angError = np.degrees(np.arccos(np.dot(
+                            parameters['gratingPos'] / np.linalg.norm(parameters['gratingPos']), 
+                            normMousePos)))
+                        mouseEcc = np.linalg.norm(mousePos - np.array([0, 0]))
+                event.clearEvents()
+                
+    if parameters['saccadeInput'] == 'EyeLink':
+        event.sendMessage("TRIALID %02d" % parameters['trialNum'])
+    
 
 # Add current time
 expParams['dateStr'] = data.getDateStr()
@@ -276,6 +349,16 @@ vol = launchScan(
     mode = expParams['expMode'],
     wait_msg = "Waiting for Sync Pulse"
 )
+
+# Eyetracker 
+if expParams['saccadeInput'] == 'EyeLink':
+    eyetracker = _setup_eyelink(expParams['Screen Resolution'])
+    edf_path = '/sub-' + "{0:0=3d}_".format(subject) + "eyelink_run-" + str(run)
+    
+    assert edf_path is not None, "edf_path must be set so we can save the eyetracker output!"
+    eyetracker.openDataFile('temp.EDF')
+    pylink.flushGetkeyQueue()
+    eyetracker.startRecording(1, 1, 1, 1)
 
 # Display instructions
 msg1 = visual.TextStim(win, pos=[0, +3], text='Hit a key when ready')
