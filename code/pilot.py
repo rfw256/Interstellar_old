@@ -6,6 +6,9 @@ import random
 import glob
 import pickle
 import warnings
+import os
+import os.path as op
+import pandas as pd
 
 try:
     import pylink
@@ -29,7 +32,7 @@ expParams = {
     'Screen Resolution': [1920, 1080],
     'TR': 1,
     'volumes': 270,
-    'skipSync': 0,
+    'skipSync': 3,
     'sync': '5',
     'iti_list': [2.5, 3.5, 4.5, 5.5],
     'nPositions': 16,
@@ -47,8 +50,14 @@ TODO:
 - Add feedback to end of trial
 - double check data collection
 - write up tsv variable descriptions and how they are computed
-- Download Eyelink package from SR tools and get pylink to import properly
-- Figure out issue with while loop and timing/refresh rate 
+X Download Eyelink package from SR tools and get pylink to import properly
+- Figure out issue with while loop and timing/refresh rate
+X Add code to create subject data folder if not created
+X Add code to save a session tsv file setting params for trial and contrasts
+X add code that checks to see if file already exists
+- swap mouse input for eyetracker mouse input from psychopy
+- Edit saccade computations accordingly ^
+- Add run column to design files
 '''
 
 '''HELPER FUNCTIONS'''
@@ -118,99 +127,6 @@ def get_keypress(printkey=False, sync = expParams['sync']):
         return None
 
 
-def generate_experiment(expParams):
-    saccade_data = {}
-
-    # Try to load previous subject parameters
-    params_filenames = glob.glob(expParams["Output Directory"] + 
-        "/sub-" + "{0:0=3d}_".format(expParams["Subject"]) + "*.pickle")
-    
-    # If Previous params exist, load positions and angles
-    if params_filenames:
-        file = open(params_filenames[-1], "rb")
-        prevParams = pickle.load(file)
-        file.close()
-        
-        expParams['Positions'] = prevParams['Positions']
-        expParams['AnglesRadians'] = prevParams['AnglesRadians']
-    
-    # If previous params for sub does not exist, initialize positions and angles
-    else:
-        # If number of trials is not even, return a value error
-        if expParams['nPositions'] % len(expParams['iti_list']):
-            raise ValueError("Number of Positions not a multiple of number of ITIs.")
-
-        # Generate isoeccentric positions for stimuli, by randomly sampling radians 
-        # w/in nPositions bins of equal size
-        xstart = np.arange(0, 2*np.pi, 2*np.pi / expParams['nPositions'])
-        xstop = xstart + 2*np.pi/expParams['nPositions']
-        x = np.random.uniform(xstart, xstop)
-        positions = expParams['eccentricity'] * np.array([np.sin(x), np.cos(x)]).T 
-
-        expParams['Positions'] = positions
-        expParams['AnglesRadians'] = x
-    
-    trialnums = list(range(expParams['nPositions']))
-    random.shuffle(trialnums)
-    itis = expParams['iti_list'] * int(expParams['nPositions'] / len(expParams['iti_list']))
-    random.shuffle(itis)
-    trialParams = {}
-    print(expParams)
-    
-    for i, trial in enumerate(trialnums):
-        pos = expParams['Positions'][trial]
-        ori = np.degrees(expParams['AnglesRadians'][trial]) + 90
-        
-        if ori >= 360: ori -= 360
-
-        decrements, response_periods, contrasts = generate_decrements(
-            expParams['trialDuration'], 
-            expParams['max_decrements'], 
-            expParams['decrementDuration'], 
-            expParams['responseDuration'], 
-            constantContrast = expParams['constantContrast'])
-
-        trialParams[str(i)] = {
-            'trialNum': str(i),
-            'ITIDur': itis[trial],
-            'gratingPos': pos,
-            'gratingOri': ori,
-            'gratingAng': np.degrees(expParams['AnglesRadians'][(expParams["Positions"] == pos)[:, 0]])[0],
-            'decrements': decrements,
-            'response_periods': response_periods,
-            'contrasts': contrasts,
-            'saccadeType': expParams['saccadeType'],
-            'saccadeDuration': expParams['saccadeDuration'],
-            'saccadeInput': expParams['saccadeInput']
-        }
-        
-        saccade_data[str(i)] = {
-            'trialNum': i,
-            'ITIDur': itis[trial],
-            'gratingPosX': pos[0],
-            'gratingPosY': pos[1],
-            'gratingOri': ori,
-            'gratingAng': np.degrees(expParams['AnglesRadians'][(expParams["Positions"] == pos)[:, 0]])[0],
-            'nDecrements': decrements.shape[0],
-            'nDetected': 0,
-            'nMissed': 0,
-            'hits': 0,
-            'falseAlarms': 0,
-            'meanAccuracy': 0,
-            'saccadeType': expParams['saccadeType'],
-            'saccadePosX': None,
-            'saccadePosY': None,
-            'saccadeAng': None,
-            'saccadeEcc': None,
-            'saccadeRT': None,
-            'saccadeErrorDist': None,
-            'saccadeErrorAng': None,
-            'saccadeErrorEcc': None
-        }
-
-    return trialParams, saccade_data
-
-
 def saccade_response(parameters, saccadeInput, eyetracker, event, fixation, win, globalClock):
     clicked = False
     mousePos = None
@@ -259,8 +175,150 @@ def saccade_response(parameters, saccadeInput, eyetracker, event, fixation, win,
         while globalClock.getTime() - saccadeClockStart <= parameters['saccadeDuration']:
             pass
     
-    return clicked, mousePos, mouseTime, mouseAng, mouseEcc, angError
+    return clicked, mousePos, mouseTime, mouseAng, mouseEcc, angError       
+
+
+def init_pilot_params(expParams):
+    # Set filenames and paths to be used
+    tsv_filename_trial = '/sub-%03d_designTrial.tsv' % expParams['Subject']
+    tsv_filename_contrast = '/sub-%03d_designContrast.tsv' % expParams['Subject']
+    pickle_filename = '/sub-%03d_expParams.pickle' % expParams['Subject']
+    subj_dir = op.join('../design/', "sub-%03d" % expParams['Subject'])
+
+    # If subject directory does not exist, make one
+    if not op.exists(subj_dir):
+        os.makedirs(subj_dir)
+
+    # If previous params file doesn't already exist in aforementioned directory, 
+    # initialize one with new positions
+    if pickle_filename.strip('/') not in os.listdir(subj_dir):
+
+        # If number of trials is not even, return a value error
+        if expParams['nPositions'] % len(expParams['iti_list']):
+            raise ValueError("Number of Positions not a multiple of number of ITIs.")
+
+        # Generate isoeccentric positions for stimuli, by randomly sampling radians 
+        # w/in nPositions bins of equal size
+        xstart = np.arange(0, 2*np.pi, 2*np.pi / expParams['nPositions'])
+        xstop = xstart + 2*np.pi/expParams['nPositions']
+        x = np.random.uniform(xstart, xstop)
+        positions = expParams['eccentricity'] * np.array([np.sin(x), np.cos(x)]).T 
+
+        expParams['Positions'] = positions
+        expParams['AnglesRadians'] = x
+        write_mode = 'w'
+        header = True
+    
+    # If params file already exists, load previous position/angle parameters
+    else:
+        file = open(subj_dir + pickle_filename, "rb")
+        prevParams = pickle.load(file)
+        file.close()
         
+        expParams['Positions'] = prevParams['Positions']
+        expParams['AnglesRadians'] = prevParams['AnglesRadians']
+        write_mode = 'a'
+        header = False
+
+    # Generate randomized trials & itis
+    trialnums = list(range(expParams['nPositions']))
+    random.shuffle(trialnums)
+    itis = expParams['iti_list'] * int(expParams['nPositions'] / len(expParams['iti_list']))
+    random.shuffle(itis)
+
+    # Initialize dictionaries
+    trialParams = {}
+    saccade_data = {}
+    trial_design = pd.DataFrame(columns =         
+        ['run', 'trialNum', 'ITIDur', 'gratingPosX', 'gratingPosY', 'gratingOri', 'gratingAng', 'saccadeType',
+        'saccadeDuration', 'saccadeInput'])
+    contrast_design = pd.DataFrame(columns = ['run', 'trialNum', 'decrementStart', 'decrementStop', 
+        'responseStop', 'contrast'])
+
+    # Loop through each trial and generate trial-specific parameters
+    for i, trial in enumerate(trialnums):
+        pos = expParams['Positions'][trial]
+        ori = np.degrees(expParams['AnglesRadians'][trial]) + 90
+        
+        if ori >= 360: ori -= 360
+
+        # Generate 1-4 contrasts per trial, at random intervals
+        decrements, response_periods, contrasts = generate_decrements(
+            expParams['trialDuration'], 
+            expParams['max_decrements'], 
+            expParams['decrementDuration'], 
+            expParams['responseDuration'], 
+            constantContrast = expParams['constantContrast'])
+
+        # Save generated trial parameters
+        trialParams[str(i)] = {
+            'trialNum': str(i),
+            'ITIDur': itis[trial],
+            'gratingPos': pos,
+            'gratingOri': ori,
+            'gratingAng': np.degrees(expParams['AnglesRadians'][(expParams["Positions"] == pos)[:, 0]])[0],
+            'decrements': decrements,
+            'response_periods': response_periods,
+            'contrasts': contrasts,
+            'saccadeType': expParams['saccadeType'],
+            'saccadeDuration': expParams['saccadeDuration'],
+            'saccadeInput': expParams['saccadeInput']
+        }
+        
+        # Preload saccade data for each trial w/ trial parameters
+        saccade_data[str(i)] = {
+            'trialNum': i,
+            'ITIDur': itis[trial],
+            'gratingPosX': pos[0],
+            'gratingPosY': pos[1],
+            'gratingOri': ori,
+            'gratingAng': np.degrees(expParams['AnglesRadians'][(expParams["Positions"] == pos)[:, 0]])[0],
+            'nDecrements': decrements.shape[0],
+            'nDetected': 0,
+            'nMissed': 0,
+            'hits': 0,
+            'falseAlarms': 0,
+            'meanAccuracy': 0,
+            'saccadeType': expParams['saccadeType'],
+            'saccadePosX': None,
+            'saccadePosY': None,
+            'saccadeAng': None,
+            'saccadeEcc': None,
+            'saccadeRT': None,
+            'saccadeErrorDist': None,
+            'saccadeErrorAng': None,
+            'saccadeErrorEcc': None
+        }
+
+        # Append design info to design DataFrames
+        trial_design = trial_design.append({
+            'run': expParams['Run'],
+            'trialNum': str(i),
+            'ITIDur': itis[trial],
+            'gratingPosX': pos[0],
+            'gratingPosY': pos[1],
+            'gratingOri': ori,
+            'gratingAng': np.degrees(expParams['AnglesRadians'][(expParams["Positions"] == pos)[:, 0]])[0],
+            'saccadeType': expParams['saccadeType'],
+            'saccadeDuration': expParams['saccadeDuration'],
+            'saccadeInput': expParams['saccadeInput']
+            }, ignore_index = True, )
+
+        cdf = pd.DataFrame(np.asarray([expParams['Run'] * np.ones(len(decrements)),
+            i * np.ones(len(decrements)), decrements[:, 0], decrements[:, 1], 
+            response_periods[:, 1], contrasts]).T,
+            columns = ['run', 'trialNum', 'decrementStart', 'decrementStop', 
+                'responseStop', 'contrast']
+        )
+        contrast_design = contrast_design.append(cdf, ignore_index=True)
+
+    # Write design dataframes to tsv
+    trial_design.to_csv(subj_dir + tsv_filename_trial, sep = '\t', mode=write_mode, header=header)
+    contrast_design.to_csv(subj_dir + tsv_filename_contrast, sep = '\t', mode=write_mode, header=header)
+
+    # Return run trial parameters
+    return trialParams, saccade_data
+
 
 # Add current time
 expParams['dateStr'] = data.getDateStr()
@@ -275,21 +333,19 @@ dlg = gui.DlgFromDict(expParams, title = 'Perception Pilot', fixed = [
     order = list(expParams.keys()))
 
 # INITIALIZE EXPERIMENT
-subdir = expParams['Output Directory']
+subdir = '../data/sub-%03d/'
 subject = expParams['Subject']
 date = expParams['dateStr']
 run = expParams['Run']
 
-trialParams, saccade_data = generate_experiment(expParams)
+trialParams, saccade_data = init_pilot_params(expParams)
 contrast_data = {}
 nPressed = -1
 
 # Save experiment params to file
 if dlg.OK:
-    params_filename = '/sub-' + "{0:0=3d}_".format(subject) + "expParams"
-    toFile(subdir + params_filename + '.pickle', expParams)
-    print("EXPPARAMS:")
-    print(expParams)
+    params_filename = '../design/sub-%03d/sub-%03d_expParams.pickle' % (subject, subject)
+    toFile(params_filename, expParams)
 else:
     core.quit()
 
@@ -509,10 +565,14 @@ win.flip()
 
 while globalClock.getTime() - delayStart < 6:
     pass
-    
+
+# If data subdir doesn't exist, create one
+if not op.exists(subdir):
+    os.makedirs(subdir)
+
 # Save data to files
-saccades_filename = '/sub-' + "{0:0=3d}_".format(subject) + "saccades_run-" + str(run)
-saccades_datafile = open(subdir + saccades_filename +'.tsv', 'w')
+saccades_filename = subdir + '/sub-%03d_saccades_run-%d.tsv' % (subject, str(run))
+saccades_datafile = open(saccades_filename, 'w')
 saccades_datafile.write("\t".join(map(str, list(saccade_data[str(0)].keys()))))
 for trial in range(expParams['nPositions']):
     saccades_datafile.write("\n" + "\t".join(
@@ -520,8 +580,7 @@ for trial in range(expParams['nPositions']):
         
 saccades_datafile.close()
 
-
-contrast_filename = '/sub-' + "{0:0=3d}_".format(subject) + "contrast_run-" + str(run)
+contrast_filename = subdir + '/sub-%03d_contrast_run-%d.tsv' % (subject, str(run))
 contrast_datafile = open(subdir + contrast_filename+'.tsv', 'w')
 contrast_datafile.write("\t".join(map(str, list(contrast_data[str(0)].keys()))))
 for n in range(nPressed+1):
