@@ -1,6 +1,7 @@
 from psychopy import core, visual, gui, data, event, monitors
 from psychopy.tools.filetools import fromFile, toFile
 from psychopy.hardware.emulator import launchScan
+from EyeLinkCoreGraphicsPsychoPy import EyeLinkCoreGraphicsPsychoPy
 import numpy as np
 import random
 import glob
@@ -9,6 +10,7 @@ import warnings
 import os
 import os.path as op
 import pandas as pd
+from datetime import date
 
 try:
     import pylink
@@ -23,10 +25,10 @@ expParams = {
     'saccadeType': ['Saccade', 'No Saccade'],
     'saccadeInput': ['Mouse', 'EyeLink'],
     'expMode': ['Test', 'Scan'],
-    'Output Directory': "/Users/rfw256/Documents/Research/Interstellar/data",
+    'Output Directory': "/Users/robwoodry/Documents/Research/Interstellar/data",
     #'Output Directory': "/Users/winawerlab/Experiments/Interstellar/data",
     
-    # Parameters below this line will be fixed and uneditable from the dialogbox
+    # Parameters below this line will be fixed and uneditable from the dialog
     'Screen Distance': 68,
     'Screen Width': 32,
     'Screen Resolution': [1920, 1080],
@@ -35,7 +37,7 @@ expParams = {
     'skipSync': 3,
     'sync': '5',
     'iti_list': [2.5, 3.5, 4.5, 5.5],
-    'nPositions': 16,
+    'nPositions': 4,
     'max_decrements': 4,
     'eccentricity': 7,
     'trialDuration': 11.5,
@@ -61,13 +63,14 @@ X add code that checks to see if file already exists
 '''
 
 '''HELPER FUNCTIONS'''
-def _setup_eyelink(win_size):
+def _setup_eyelink(win_size, win):
     """set up the eyelink eye-tracking
     """
 
     # Connect to eyelink
-    eyetracker = pylink.EyeLink('192.168.1.5')
-    pylink.openGraphics()
+    eyetracker = pylink.EyeLink('100.1.1.1')
+    genv = EyeLinkCoreGraphicsPsychoPy(eyetracker, win)
+    pylink.openGraphicsEx(genv)
 
     # Set content of edf file
     eyetracker.sendCommand('link_sample_data=LEFT,RIGHT,GAZE,AREA')
@@ -170,7 +173,7 @@ def saccade_response(parameters, saccadeInput, eyetracker, event, fixation, win,
                 event.clearEvents()
                 
     if parameters['saccadeInput'] == 'EyeLink':
-        eyetracker.sendMessage("SACC TRIALID %02d" % parameters['trialNum'])
+        eyetracker.sendMessage("SACC TRIALID %s" % parameters['trialNum'])
         
         while globalClock.getTime() - saccadeClockStart <= parameters['saccadeDuration']:
             pass
@@ -187,7 +190,7 @@ def init_pilot_params(expParams):
 
     # If subject directory does not exist, make one
     if not op.exists(subj_dir):
-        os.makedirs(subj_dir)
+        os.makedirs(subj_dir % (subject))
 
     # If previous params file doesn't already exist in aforementioned directory, 
     # initialize one with new positions
@@ -333,9 +336,9 @@ dlg = gui.DlgFromDict(expParams, title = 'Perception Pilot', fixed = [
     order = list(expParams.keys()))
 
 # INITIALIZE EXPERIMENT
-subdir = '../data/sub-%03d/'
 subject = expParams['Subject']
-date = expParams['dateStr']
+subdir = '../data/sub-%03d/' % subject
+dateStr = expParams['dateStr']
 run = expParams['Run']
 
 trialParams, saccade_data = init_pilot_params(expParams)
@@ -353,7 +356,7 @@ else:
 monitor = monitors.Monitor('testMonitor', distance = expParams['Screen Distance'], width = expParams['Screen Width'])
 win = visual.Window(
     expParams['Screen Resolution'], allowGUI=True, monitor=monitor, units='deg',
-    fullscr = True)
+    fullscr = False)
 
 grating = visual.GratingStim(
     win, sf=1, size=3, mask='gauss', maskParams = {'sd': 5},
@@ -364,10 +367,11 @@ fixation = visual.GratingStim(
 
 # Eyetracker 
 if expParams['saccadeInput'] == 'EyeLink':
-    eyetracker = _setup_eyelink(expParams['Screen Resolution'])
-    edf_path = '/sub-' + "{0:0=3d}_".format(subject) + "eyelink_run-" + str(run)
+    edf_name = "ISs%02dr%02d.EDF" % (subject, run)
+    print(edf_name)
+    eyetracker = _setup_eyelink(expParams['Screen Resolution'], win)
     
-    eyetracker.openDataFile('temp.EDF')
+    eyetracker.openDataFile(edf_name)
     pylink.flushGetkeyQueue()
     eyetracker.startRecording(1, 1, 1, 1)
     
@@ -436,7 +440,7 @@ for trial in range(expParams['nPositions']):
 
     itiClock.reset()
     if expParams['saccadeInput'] == 'EyeLink': 
-        eyetracker.sendMessage("ITI TRIALID %02d" % parameters['trialNum'])
+        eyetracker.sendMessage("ITI TRIALID %s" % parameters['trialNum'])
     while itiClock.getTime() < parameters['ITIDur']:
         get_keypress(printkey=True)
         event.clearEvents()
@@ -458,7 +462,7 @@ for trial in range(expParams['nPositions']):
     
     # Stimulus Presentation - Trial
     if expParams['saccadeInput'] == 'EyeLink': 
-        eyetracker.sendMessage("STIM TRIALID %02d" % parameters['trialNum'])
+        eyetracker.sendMessage('TRIALID %s' % parameters['trialNum'])
     while trialClock.getTime() < expParams['trialDuration']:
         t = trialClock.getTime() * 1000 
 
@@ -571,7 +575,7 @@ if not op.exists(subdir):
     os.makedirs(subdir)
 
 # Save data to files
-saccades_filename = subdir + '/sub-%03d_saccades_run-%d.tsv' % (subject, str(run))
+saccades_filename = subdir + '/sub-%03d_saccades_run-%s.tsv' % (subject, str(run))
 saccades_datafile = open(saccades_filename, 'w')
 saccades_datafile.write("\t".join(map(str, list(saccade_data[str(0)].keys()))))
 for trial in range(expParams['nPositions']):
@@ -580,8 +584,8 @@ for trial in range(expParams['nPositions']):
         
 saccades_datafile.close()
 
-contrast_filename = subdir + '/sub-%03d_contrast_run-%d.tsv' % (subject, str(run))
-contrast_datafile = open(subdir + contrast_filename+'.tsv', 'w')
+contrast_filename = subdir + '/sub-%03d_contrast_run-%s.tsv' % (subject, str(run))
+contrast_datafile = open(contrast_filename +'.tsv', 'w')
 contrast_datafile.write("\t".join(map(str, list(contrast_data[str(0)].keys()))))
 for n in range(nPressed+1):
     contrast_datafile.write("\n" + "\t".join(
@@ -591,8 +595,20 @@ contrast_datafile.close()
 
 if expParams['saccadeInput'] == 'EyeLink':
         eyetracker.stopRecording()
+        eyetracker.setOfflineMode()
         eyetracker.closeDataFile()
-        eyetracker.receiveDataFile('temp.EDF', edf_path)
+        
         eyetracker.close()
+        eyetracker.open()
+        local_edf = expParams['Output Directory'] + '/sub-%03d/%s' % (subject, edf_name)
+        try:
+            print(local_edf)
+            eyetracker.receiveDataFile(edf_name, local_edf)
+            eyetracker.close()
+        except:
+            print("UNABLE TO TRANSFER FILE")
+            eyetracker.close()
 
+print("EXP END")
+core.quit()
 win.close()
