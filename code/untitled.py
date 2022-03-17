@@ -1,0 +1,3 @@
+import pylink
+
+pylink.openGraphics()
