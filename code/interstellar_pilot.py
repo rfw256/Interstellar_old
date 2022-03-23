@@ -19,7 +19,7 @@ from psychopy.tools.filetools import fromFile, toFile
 import pickle
 from psychopy.hardware.emulator import launchScan
 from math import fabs, hypot
-from psychopy.tools.monitorunittools import posToPix
+from psychopy.tools.monitorunittools import posToPix, pix2deg
 
 
 # EXPERIMENT PARAMATERS
@@ -35,9 +35,9 @@ expParams = {
     #'Output Directory': "/Users/winawerlab/Experiments/Interstellar/data",
     
     # Parameters below this line will be fixed and uneditable from the dialog
-    'Screen Distance': 68,
-    'Screen Width': 32,
-    'Screen Resolution': [1920, 1080],
+    'Screen Distance': 41,
+    'Screen Width': 60,
+    'Screen Resolution': [5120, 2880],
     'TR': 1,
     'volumes': 270,
     'skipSync': 3,
@@ -299,11 +299,11 @@ def configure_eyelink(expParams, el_tracker):
     el_tracker.sendCommand("link_event_filter = %s" % link_event_flags)
     el_tracker.sendCommand("link_sample_data = %s" % link_sample_flags)
 
-    el_tracker.sendCommand("calibration_type = HV9")
+    el_tracker.sendCommand("calibration_type = HV5")
     el_tracker.sendCommand("button_function 5 'accept_target_fixation'")
 
-    el_tracker.sendCommand('calibration_area_proportion 0.88 0.83')
-    el_tracker.sendCommand('validation_area_proportion 0.88 0.83')
+#    el_tracker.sendCommand('calibration_area_proportion 0.80 0.80')
+#    el_tracker.sendCommand('validation_area_proportion 0.80 0.80')
     
     return el_tracker
 
@@ -318,7 +318,7 @@ def setup_graphics(expParams, el_tracker):
     mon = monitors.Monitor('testMonitor', distance = expParams['Screen Distance'], width = expParams['Screen Width'])
     win = visual.Window(
         expParams['Screen Resolution'], allowGUI=True, monitor=mon, units='deg',
-        fullscr = False)
+        fullscr = True)
 
     scn_width, scn_height = win.size
 
@@ -447,8 +447,22 @@ def abort_trial(win, genv):
     return pylink.TRIAL_ERROR
 
 
+def disp_coords(win, mon, sac_end_pos, grating, retina):
+    scn_width, scn_height = win.size
+    print(win.size)
+    stim_pix = posToPix(grating)
+    if retina:
+        scn_width = int(scn_width/2.0)
+        scn_height = int(scn_height/2.0)
+    sac_pix = [sac_end_pos[0] - scn_width/2, sac_end_pos[1] - scn_height/2]
+    sac_deg = pix2deg(np.asarray(sac_pix), mon)
+    
+    print("------\nStim Pix:", stim_pix, "Sac Pix:", sac_pix, "\n", "Stim deg:", grating.pos, 
+        "Sac Deg:", sac_deg, "\n------")
+
+
 def run_trial(trial_params, trial_index, scan_clock, contrast_data, win, fixation, 
-    grating, session_folder, edf_file, genv, eye_used):
+    grating, session_folder, edf_file, genv, eye_used, mon):
     parameters = trial_params[str(trial_index)]
 
     # get a reference to the currently active EyeLink connection
@@ -623,9 +637,7 @@ def run_trial(trial_params, trial_index, scan_clock, contrast_data, win, fixatio
                     sac_response_msg = '{} saccade_resp'.format(offset)
                     el_tracker.sendMessage(sac_response_msg)
                     SRT = sac_start_time - sacc_onsetTime
-                    print("SACCADE END:", sac_end_pos)
-                    posPix = posToPix(grating)
-                    print("GRATING:", posPix)
+                    disp_coords(win, mon, sac_end_pos, grating, expParams['use_retina'])
 
     # send a 'TRIAL_RESULT' message to mark the end of trial, see Data
     # Viewer User Manual, "Protocol for EyeLink Data to Viewer Integration"
@@ -755,7 +767,7 @@ def run_experiment(expParams):
     for trial in range(expParams['nPositions']):
         SRT, land_err, contrast_data = run_trial(trialParams, trial_index, 
             scan_clock, contrast_data, win, fixation, grating, session_folder, 
-            edf_file, genv, eye_used)
+            edf_file, genv, eye_used, mon)
         trial_index += 1
 
     # send a message to mark the end of a run
