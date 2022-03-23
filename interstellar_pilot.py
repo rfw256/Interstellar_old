@@ -18,6 +18,9 @@ import pandas as pd
 from psychopy.tools.filetools import fromFile, toFile
 import pickle
 from psychopy.hardware.emulator import launchScan
+from math import fabs, hypot
+from psychopy.tools.monitorunittools import posToPix, pix2deg
+
 
 # EXPERIMENT PARAMATERS
 expParams = {
@@ -32,9 +35,9 @@ expParams = {
     #'Output Directory': "/Users/winawerlab/Experiments/Interstellar/data",
     
     # Parameters below this line will be fixed and uneditable from the dialog
-    'Screen Distance': 68,
-    'Screen Width': 32,
-    'Screen Resolution': [1920, 1080],
+    'Screen Distance': 41,
+    'Screen Width': 60,
+    'Screen Resolution': [5120, 2880],
     'TR': 1,
     'volumes': 270,
     'skipSync': 3,
@@ -236,8 +239,7 @@ def connect_eyelink(expParams):
     if not os.path.exists(results_folder):
         os.makedirs(results_folder)
 
-    time_str = time.strftime("_%Y_%m_%d_%H_%M", time.localtime())
-    session_identifier = edf_fname + time_str
+    session_identifier = "sub-%03d" % expParams['Subject']
 
     session_folder = os.path.join(results_folder, session_identifier)
     if not os.path.exists(session_folder):
@@ -297,11 +299,11 @@ def configure_eyelink(expParams, el_tracker):
     el_tracker.sendCommand("link_event_filter = %s" % link_event_flags)
     el_tracker.sendCommand("link_sample_data = %s" % link_sample_flags)
 
-    el_tracker.sendCommand("calibration_type = HV9")
+    el_tracker.sendCommand("calibration_type = HV5")
     el_tracker.sendCommand("button_function 5 'accept_target_fixation'")
 
-    el_tracker.sendCommand('calibration_area_proportion 0.88 0.83')
-    el_tracker.sendCommand('validation_area_proportion 0.88 0.83')
+#    el_tracker.sendCommand('calibration_area_proportion 0.80 0.80')
+#    el_tracker.sendCommand('validation_area_proportion 0.80 0.80')
     
     return el_tracker
 
@@ -316,7 +318,7 @@ def setup_graphics(expParams, el_tracker):
     mon = monitors.Monitor('testMonitor', distance = expParams['Screen Distance'], width = expParams['Screen Width'])
     win = visual.Window(
         expParams['Screen Resolution'], allowGUI=True, monitor=mon, units='deg',
-        fullscr = False)
+        fullscr = True)
 
     scn_width, scn_height = win.size
 
@@ -371,7 +373,7 @@ def show_msg(win, text, genv, wait_for_keypress=True):
     # wait indefinitely, terminates upon any key press
     if wait_for_keypress:
         event.waitKeys()
-        clear_screen(win)
+        clear_screen(win, genv)
 
 
 def terminate_task(win, session_folder, edf_file, genv):
@@ -387,7 +389,7 @@ def terminate_task(win, session_folder, edf_file, genv):
         # Terminate the current trial first if the task terminated prematurely
         error = el_tracker.isRecording()
         if error == pylink.TRIAL_OK:
-            abort_trial()
+            abort_trial(win, genv)
 
         # Put tracker in Offline mode
         el_tracker.setOfflineMode()
@@ -422,7 +424,7 @@ def terminate_task(win, session_folder, edf_file, genv):
     sys.exit()
 
 
-def abort_trial():
+def abort_trial(win, genv):
     """Ends recording """
 
     el_tracker = pylink.getEYELINK()
@@ -434,7 +436,7 @@ def abort_trial():
         el_tracker.stopRecording()
 
     # clear the screen
-    clear_screen(win)
+    clear_screen(win, genv)
     # Send a message to clear the Data Viewer screen
     bgcolor_RGB = (116, 116, 116)
     el_tracker.sendMessage('!V CLEAR %d %d %d' % bgcolor_RGB)
@@ -445,7 +447,22 @@ def abort_trial():
     return pylink.TRIAL_ERROR
 
 
-def run_trial(trial_params, trial_index, scan_clock, contrast_data, win, fixation, grating):
+def disp_coords(win, mon, sac_end_pos, grating, retina):
+    scn_width, scn_height = win.size
+    print(win.size)
+    stim_pix = posToPix(grating)
+    if retina:
+        scn_width = int(scn_width/2.0)
+        scn_height = int(scn_height/2.0)
+    sac_pix = [sac_end_pos[0] - scn_width/2, sac_end_pos[1] - scn_height/2]
+    sac_deg = pix2deg(np.asarray(sac_pix), mon)
+    
+    print("------\nStim Pix:", stim_pix, "Sac Pix:", sac_pix, "\n", "Stim deg:", grating.pos, 
+        "Sac Deg:", sac_deg, "\n------")
+
+
+def run_trial(trial_params, trial_index, scan_clock, contrast_data, win, fixation, 
+    grating, session_folder, edf_file, genv, eye_used, mon):
     parameters = trial_params[str(trial_index)]
 
     # get a reference to the currently active EyeLink connection
@@ -489,7 +506,7 @@ def run_trial(trial_params, trial_index, scan_clock, contrast_data, win, fixatio
             # Terminate the task if Ctrl-c
             if keycode == 'c' and (modifier['ctrl'] is True):
                 el_tracker.sendMessage('terminated_by_user')
-                terminate_task()
+                terminate_task(win, session_folder, edf_file, genv)
                 
     # Stimulus
     lastContrastTimeSet = False
@@ -500,6 +517,9 @@ def run_trial(trial_params, trial_index, scan_clock, contrast_data, win, fixatio
     falseAlarms = 0
     fixation.mask = 'circle'
     fixation.size = 0.3
+    response_times = []
+    nPressed = 0
+    detected = np.zeros(decrements.shape[0])
     
     fixation.draw()
     win.flip()
@@ -536,9 +556,9 @@ def run_trial(trial_params, trial_index, scan_clock, contrast_data, win, fixatio
             # Terminate the task if Ctrl-c
             if keycode == 'c' and (modifier['ctrl'] is True):
                 el_tracker.sendMessage('terminated_by_user')
-                terminate_task()
+                terminate_task(win, session_folder, edf_file, genv)
             # If 1 was pressed, record response
-            if keycode == '1':
+            if keycode in ['1', '2', '3', '4']:
                 response_times.append(scan_clock.getTime())
                 nPressed += 1
                 response_acc = 0
@@ -552,15 +572,23 @@ def run_trial(trial_params, trial_index, scan_clock, contrast_data, win, fixatio
                     falseAlarms += 1
                 
                 contrast_data[str(nPressed)] = {
-                    'trialNum': trial,
+                    'trialNum': trial_index,
                     'nDecrements': decrements.shape[0],
                     'contrast': lastContrast,
-                    'responseTimes': globalClock.getTime()*1000,
+                    'responseTimes': scan_clock.getTime()*1000,
                     'responseAcc': response_acc,
                     'reactionTime': t - lastContrastTime
                 }
     
     # Saccade Response
+    if expParams['saccadeType'] == 'Saccade':
+        fixation.color = 'green'
+    else:
+        fixation.color = 'red'
+
+    fixation.draw()
+    win.flip()
+    
     got_sac = False
     sac_start_time = -1
     SRT = -1  # initialize a variable to store saccadic reaction time (SRT)
@@ -574,7 +602,7 @@ def run_trial(trial_params, trial_index, scan_clock, contrast_data, win, fixatio
         error = el_tracker.isRecording()
         if error is not pylink.TRIAL_OK:
             el_tracker.sendMessage('tracker_disconnected')
-            abort_trial()
+            abort_trial(win, genv)
             return error
 
         # check for keyboard events
@@ -582,7 +610,7 @@ def run_trial(trial_params, trial_index, scan_clock, contrast_data, win, fixatio
             # Terminate the task if Ctrl-c
             if keycode == 'c' and (modifier['ctrl'] is True):
                 el_tracker.sendMessage('terminated_by_user')
-                terminate_task()
+                terminate_task(win, session_folder, edf_file, genv)
                 return pylink.ABORT_EXPT
 
         # grab the events in the buffer, for more details,
@@ -598,7 +626,7 @@ def run_trial(trial_params, trial_index, scan_clock, contrast_data, win, fixatio
                 sac_end_pos = eye_dat.getEndGaze()  # end position
 
                 # a saccade was initiated
-                if sac_start_time <= tar_onset_time:
+                if sac_start_time <= sacc_onsetTime:
                     sac_start_time = -1
                     pass  # ignore saccades occurred before target onset
                 elif hypot(sac_amp[0], sac_amp[1]) > 1.5:
@@ -611,7 +639,8 @@ def run_trial(trial_params, trial_index, scan_clock, contrast_data, win, fixatio
                     offset = int(el_tracker.trackerTime()-sac_start_time)
                     sac_response_msg = '{} saccade_resp'.format(offset)
                     el_tracker.sendMessage(sac_response_msg)
-                    SRT = sac_start_time - tar_onset_time
+                    SRT = sac_start_time - sacc_onsetTime
+                    disp_coords(win, mon, sac_end_pos, grating, expParams['use_retina'])
 
     # send a 'TRIAL_RESULT' message to mark the end of trial, see Data
     # Viewer User Manual, "Protocol for EyeLink Data to Viewer Integration"
@@ -656,13 +685,22 @@ def run_experiment(expParams):
     el_tracker = configure_eyelink(expParams, el_tracker)
     mon, win, genv = setup_graphics(expParams, el_tracker)
     
+    # Calibrate EyeLink
+    if expParams['saccadeInput'] == 'EyeLink':
+        task_msg = 'Press ENTER to calibrate tracker'
+        show_msg(win, task_msg, genv)
+        
+        try:
+            el_tracker.doTrackerSetup()
+        except RuntimeError as err:
+            print('ERROR:', err)
+            el_tracker.exitCalibration()
+        
     # Create stimuli
     grating = visual.GratingStim(
         win, sf=1, size=3, mask='gauss', maskParams = {'sd': 5},
         pos=[-4,0], ori=0, units = 'deg')
-    fixation = visual.GratingStim(
-        win, color=-1, colorSpace='rgb', tex=None, mask='cross', size=0.5)
-        
+    fixation = visual.TextStim(win, text='+', height=2, color=(-1, -1, -1))
     
     # Display instructions
     if expParams['saccadeType'] == 'Saccade':
@@ -693,10 +731,22 @@ def run_experiment(expParams):
         el_tracker.startRecording(1, 1, 1, 1)
     except RuntimeError as error:
         print("ERROR:", error)
-        terminate_task()
+        terminate_task(win, session_folder, edf_file, genv)
 
     # Allocate some time for the tracker to cache some samples
     pylink.pumpDelay(100)
+    
+    # Register Eye uses
+    eye_used = el_tracker.eyeAvailable()
+    print(eye_used)
+    if eye_used == 1:
+        el_tracker.sendMessage("EYE_USED 1 RIGHT")
+    elif eye_used == 0 or eye_used == 2:
+        el_tracker.sendMessage("EYE_USED 0 LEFT")
+        eye_used = 0
+    else:
+        print("Error in getting the eye information!")
+        return pylink.TRIAL_ERROR
     
     # fMRI Sync Trigger
     vol = launchScan(
@@ -718,7 +768,9 @@ def run_experiment(expParams):
     # Trial loop
     trial_index = 0
     for trial in range(expParams['nPositions']):
-        SRT, land_err, contrast_data = run_trial(trialParams, trial_index, scan_clock, contrast_data, win, fixation, grating)
+        SRT, land_err, contrast_data = run_trial(trialParams, trial_index, 
+            scan_clock, contrast_data, win, fixation, grating, session_folder, 
+            edf_file, genv, eye_used, mon)6
         trial_index += 1
 
     # send a message to mark the end of a run
