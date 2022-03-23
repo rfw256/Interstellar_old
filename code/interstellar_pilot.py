@@ -517,6 +517,9 @@ def run_trial(trial_params, trial_index, scan_clock, contrast_data, win, fixatio
     falseAlarms = 0
     fixation.mask = 'circle'
     fixation.size = 0.3
+    response_times = []
+    nPressed = 0
+    detected = np.zeros(decrements.shape[0])
     
     fixation.draw()
     win.flip()
@@ -555,7 +558,7 @@ def run_trial(trial_params, trial_index, scan_clock, contrast_data, win, fixatio
                 el_tracker.sendMessage('terminated_by_user')
                 terminate_task(win, session_folder, edf_file, genv)
             # If 1 was pressed, record response
-            if keycode == '1':
+            if keycode in ['1', '2', '3', '4']:
                 response_times.append(scan_clock.getTime())
                 nPressed += 1
                 response_acc = 0
@@ -569,10 +572,10 @@ def run_trial(trial_params, trial_index, scan_clock, contrast_data, win, fixatio
                     falseAlarms += 1
                 
                 contrast_data[str(nPressed)] = {
-                    'trialNum': trial,
+                    'trialNum': trial_index,
                     'nDecrements': decrements.shape[0],
                     'contrast': lastContrast,
-                    'responseTimes': globalClock.getTime()*1000,
+                    'responseTimes': scan_clock.getTime()*1000,
                     'responseAcc': response_acc,
                     'reactionTime': t - lastContrastTime
                 }
@@ -767,7 +770,7 @@ def run_experiment(expParams):
     for trial in range(expParams['nPositions']):
         SRT, land_err, contrast_data = run_trial(trialParams, trial_index, 
             scan_clock, contrast_data, win, fixation, grating, session_folder, 
-            edf_file, genv, eye_used, mon)
+            edf_file, genv, eye_used, mon)6
         trial_index += 1
 
     # send a message to mark the end of a run
