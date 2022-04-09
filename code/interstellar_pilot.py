@@ -28,8 +28,8 @@ expParams = {
     'Run': 1,
     'saccadeType': ['Saccade', 'No Saccade'],
     'saccadeInput': ['EyeLink', "Mouse"],
-    'expMode': ['Test', 'Scan'],
-    'use_retina': True,
+    'expMode': ['Scan', 'Test'],
+    'use_retina': False,
     'Full Screen': True,
     #'Output Directory': "/Applications/EyeLink/SampleExperiments/Python/examples/Psychopy_examples/interstellar/data",
     #'Output Directory': "/Users/robwoodry/Documents/Research/Interstellar/data",
@@ -45,15 +45,15 @@ expParams = {
     'skipSync': 3,
     'sync': '5',
     'iti_list': [2.5, 3.5, 4.5, 5.5],
-    'nPositions': 4,
-    'max_decrements': 1,
-    'Contrast': 0.5,
+    'nPositions': 16,
+    'max_decrements': 4,
+    'Contrast': 0.6,
     'eccentricity': 7,
-    'trialDuration': 4,
+    'trialDuration': 11.5,
     'saccadeDuration': 1,
     'decrementDuration': 0.5,
     'responseDuration': 1,
-    'constantContrast': 0.65
+    'constantContrast': 1
     }
 
 # HELPER FUNCTIONS
@@ -304,8 +304,8 @@ def configure_eyelink(expParams, el_tracker):
     el_tracker.sendCommand("calibration_type = HV5")
     el_tracker.sendCommand("button_function 5 'accept_target_fixation'")
 
-#    el_tracker.sendCommand('calibration_area_proportion 0.80 0.80')
-#    el_tracker.sendCommand('validation_area_proportion 0.80 0.80')
+    el_tracker.sendCommand('calibration_area_proportion 0.80 0.80')
+    el_tracker.sendCommand('validation_area_proportion 0.80 0.80')
     
     return el_tracker
 
@@ -652,10 +652,15 @@ def run_trial(trial_params, trial_index, scan_clock, contrast_data, win, fixatio
 def write_data(contrast_data, expParams, session_folder, nPressed):
     contrast_filename = session_folder + '/sub-%03d_contrast_run-%s.tsv' % (expParams['Subject'], str(expParams['Run']))
     contrast_datafile = open(contrast_filename, 'w')
-    contrast_datafile.write("\t".join(map(str, list(contrast_data[str(0)].keys()))))
-    for n in range(nPressed + 1):
-        contrast_datafile.write("\n" + "\t".join(
-            map(str, list(contrast_data[str(n)].values()))))
+    
+    if nPressed > 0:
+        contrast_datafile.write("\t".join(map(str, list(contrast_data[str(0)].keys()))))
+        
+        for n in range(nPressed + 1):
+            contrast_datafile.write("\n" + "\t".join(
+                map(str, list(contrast_data[str(n)].values()))))
+    else:
+        print("NO CONTRAST DATA FOUND - nPressed == 0")
 
     contrast_datafile.close()
     
@@ -785,6 +790,14 @@ def run_experiment(expParams):
             scan_clock, contrast_data, win, fixation, grating, session_folder, 
             edf_file, genv, eye_used, mon, nPressed)
         trial_index += 1
+        
+    # Post Trial delay (6s)
+    time = scan_clock.getTime()
+    fixation.color = 'black'
+    fixation.draw()
+    win.flip()
+    while scan_clock.getTime() - time <= 6:
+        pass
 
     # send a message to mark the end of a run
     el_tracker.sendMessage('Scan_end_Run_%d' % (expParams['Run']))
