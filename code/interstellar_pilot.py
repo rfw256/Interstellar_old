@@ -33,8 +33,8 @@ expParams = {
     'Full Screen': True,
     #'Output Directory': "/Applications/EyeLink/SampleExperiments/Python/examples/Psychopy_examples/interstellar/data",
     #'Output Directory': "/Users/robwoodry/Documents/Research/Interstellar/data",
-    #'Output Directory': "/Users/winawerlab/Experiments/Interstellar/data",
-    'Output Directory': "/Users/rfw256/Documents/Research/Interstellar/data",
+    'Output Directory': "/Users/winawerlab/Experiments/Interstellar/data",
+    #'Output Directory': "/Users/rfw256/Documents/Research/Interstellar/data",
     
     # Parameters below this line will be fixed and uneditable from the dialog
     'Screen Distance': 68,
