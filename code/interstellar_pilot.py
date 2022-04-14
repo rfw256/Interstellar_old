@@ -37,9 +37,9 @@ expParams = {
     #'Output Directory': "/Users/rfw256/Documents/Research/Interstellar/data",
     
     # Parameters below this line will be fixed and uneditable from the dialog
-    'Screen Distance': 68,
-    'Screen Width': 32,
-    'Screen Resolution': [1024, 768],
+    'Screen Distance': 83.5,
+    'Screen Width': 64.35,
+    'Screen Resolution': [1920, 1080],
     'TR': 1,
     'volumes': 270,
     'skipSync': 3,
@@ -47,7 +47,7 @@ expParams = {
     'iti_list': [2.5, 3.5, 4.5, 5.5],
     'nPositions': 16,
     'max_decrements': 4,
-    'Contrast': 0.6,
+    'Contrast': 0.4,
     'eccentricity': 7,
     'trialDuration': 11.5,
     'saccadeDuration': 1,
@@ -251,7 +251,7 @@ def connect_eyelink(expParams):
         el_tracker = pylink.EyeLink(None)
     elif expParams['saccadeInput'] == 'EyeLink':
         try:
-            el_tracker = pylink.EyeLink("100.1.1.1")
+            el_tracker = pylink.EyeLink("192.168.1.5")
         except RuntimeError as error:
             print('ERROR:', error)
             core.quit()
@@ -301,11 +301,11 @@ def configure_eyelink(expParams, el_tracker):
     el_tracker.sendCommand("link_event_filter = %s" % link_event_flags)
     el_tracker.sendCommand("link_sample_data = %s" % link_sample_flags)
 
-    el_tracker.sendCommand("calibration_type = HV5")
+    el_tracker.sendCommand("calibration_type = HV9")
     el_tracker.sendCommand("button_function 5 'accept_target_fixation'")
 
-    el_tracker.sendCommand('calibration_area_proportion 0.80 0.80')
-    el_tracker.sendCommand('validation_area_proportion 0.80 0.80')
+    el_tracker.sendCommand('calibration_area_proportion 0.40 0.80')
+    el_tracker.sendCommand('validation_area_proportion 0.40 0.80')
     
     return el_tracker
 
@@ -317,7 +317,7 @@ def setup_graphics(expParams, el_tracker):
 #                        monitor=mon,
 #                        allowGUI = True,
 #                        units='deg')
-    mon = monitors.Monitor('testMonitor', distance = expParams['Screen Distance'], width = expParams['Screen Width'])
+    mon = monitors.Monitor('propixx')
     win = visual.Window(
         expParams['Screen Resolution'], allowGUI=True, monitor=mon, units='deg',
         fullscr = expParams['Full Screen'])
@@ -703,8 +703,8 @@ def run_experiment(expParams):
     
     # Calibrate EyeLink
     if expParams['saccadeInput'] == 'EyeLink':
-        task_msg = 'Press ENTER to calibrate tracker'
-        show_msg(win, task_msg, genv)
+#        task_msg = 'Press ENTER to calibrate tracker'
+#        show_msg(win, task_msg, genv)
         
         try:
             el_tracker.doTrackerSetup()
@@ -718,11 +718,13 @@ def run_experiment(expParams):
     else: 
         factor = 1
     grating = visual.GratingStim(
-        win, sf=1, size=3, mask='gauss', maskParams = {'sd': 5},
+        win, sf=2, size=3, mask='gauss', maskParams = {'sd': 5},
         pos=[-4,0], ori=0, units = 'deg')
-    fixation = visual.TextStim(win, text='+', height=2 * factor, color=(-1, -1, -1))
+    fixation = visual.TextStim(win, text='+', height= 1 * factor, 
+        color=(-1, -1, -1), units = 'deg')
     
     # Display instructions
+    instructions = 'NO SACCADE'
     if expParams['saccadeType'] == 'Saccade':
         instructions = "[PARTICIPANT] Press 1 when you detect a change in contrast. At the end of each trial, make a saccade"
     elif expParams['saccadeInput'] == 'No Saccade':
